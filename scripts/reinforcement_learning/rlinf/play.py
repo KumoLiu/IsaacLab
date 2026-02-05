@@ -1,379 +1,236 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers.
 # All rights reserved.
-#
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Script to evaluate/play a checkpoint of an RL agent from RLinf.
+"""Script to evaluate a trained RLinf agent.
 
-This script provides an interface to launch RLinf evaluation for IsaacLab environments
-following the standard IsaacLab reinforcement learning script pattern.
+This script runs evaluation using RLinf's distributed infrastructure,
+which is required for VLA model inference.
 
 Usage:
-    # Using IsaacLab task directly
-    python play.py --task Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-v0 \
-        --ckpt_path /path/to/checkpoint --num_envs 4
+    # Evaluate a trained checkpoint
+    python play.py --task Isaac-MyTask-v0 --checkpoint /path/to/checkpoint
 
-    # Using RLinf config file
-    python play.py --config_name isaaclab_franka_stack_cube_ppo_gr00t_demo \
-        --ckpt_path /path/to/checkpoint
+    # Evaluate with specific number of environments
+    python play.py --task Isaac-MyTask-v0 --checkpoint /path/to/checkpoint --num_envs 8
 
-For full RLinf evaluation with all features, use the RLinf launcher directly:
-    cd examples/embodiment
-    bash eval_embodiment.sh isaaclab_franka_stack_cube_ppo_gr00t_demo
+Note:
+    Evaluation requires the full RLinf infrastructure since VLA models
+    are too large to run on a single GPU without FSDP.
 """
 
-"""Launch Isaac Sim Simulator first."""
-
 import argparse
+import json
 import sys
-
-from isaaclab.app import AppLauncher
+from datetime import datetime
+from pathlib import Path
 
 # local imports
 import cli_args  # isort: skip
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Evaluate an RL agent with RLinf.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during evaluation.")
-parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-parser.add_argument(
-    "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
-)
+parser = argparse.ArgumentParser(description="Evaluate a trained RLinf agent.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default=None, help="Name of the task (IsaacLab environment ID).")
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
-    "--agent", type=str, default="rlinf_cfg_entry_point", help="Name of the RL agent configuration entry point."
+    "--agent", type=str, default="rlinf_cfg_entry_point", help="Name of the RLinf agent configuration entry point."
 )
-parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment.")
+parser.add_argument("--seed", type=int, default=1234, help="Seed used for the environment")
 parser.add_argument(
-    "--use_pretrained_checkpoint",
-    action="store_true",
-    help="Use the pre-trained checkpoint from Nucleus.",
+    "--checkpoint", type=str, default=None, required=True, help="Path to the model checkpoint (required)."
 )
-parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--config_name", type=str, default=None, help="RLinf Hydra config name (optional).")
+parser.add_argument("--num_episodes", type=int, default=10, help="Number of evaluation episodes.")
 # append RLinf cli arguments
 cli_args.add_rlinf_args(parser)
-# append AppLauncher cli args
-AppLauncher.add_app_launcher_args(parser)
-# parse the arguments
-args_cli, hydra_args = parser.parse_known_args()
+args_cli = parser.parse_args()
 
-# Force only_eval mode
-args_cli.only_eval = True
+# Validate arguments
+if args_cli.task is None:
+    print("[ERROR] Please specify a task with --task")
+    sys.exit(1)
 
-# always enable cameras to record video
-if args_cli.video:
-    args_cli.enable_cameras = True
+"""Rest of the script - launch RLinf evaluation."""
 
-# clear out sys.argv for Hydra
-sys.argv = [sys.argv[0]] + hydra_args
-
-# launch omniverse app
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
-
-"""Rest everything follows."""
-
-import json
 import logging
-import os
-import time
-from datetime import datetime
-
-import gymnasium as gym
-import torch
 import torch.multiprocessing as mp
-from omegaconf import OmegaConf
 
-from isaaclab.envs import (
-    DirectMARLEnv,
-    DirectMARLEnvCfg,
-    DirectRLEnv,
-    DirectRLEnvCfg,
-    ManagerBasedRLEnv,
-    ManagerBasedRLEnvCfg,
-    multi_agent_to_single_agent,
-)
-from isaaclab.utils.assets import retrieve_file_path
-from isaaclab.utils.dict import print_dict
+from hydra import compose, initialize_config_dir
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import OmegaConf, open_dict
 
-import isaaclab_tasks  # noqa: F401
-from isaaclab_tasks.utils import get_checkpoint_path
-from isaaclab_tasks.utils.hydra import hydra_task_config
+from rlinf.config import validate_cfg
+from rlinf.runners.embodied_eval_runner import EmbodiedEvalRunner
+from rlinf.scheduler import Cluster
+from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.workers.env.env_worker import EnvWorker
+from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
-# local imports
-from rl_cfg import RLinfPPORunnerCfg
-from vecenv_wrapper import RLinfVecEnvWrapper
-
-# import logger
 logger = logging.getLogger(__name__)
 
-# PLACEHOLDER: Extension template (do not remove this comment)
+mp.set_start_method("spawn", force=True)
 
 
-@hydra_task_config(args_cli.task, args_cli.agent)
-def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RLinfPPORunnerCfg | dict):
-    """Evaluate with RLinf agent."""
-    # Convert agent_cfg to OmegaConf if it's a dataclass
-    if hasattr(agent_cfg, "to_dict"):
-        agent_cfg = OmegaConf.create(agent_cfg.to_dict())
-    elif isinstance(agent_cfg, dict):
-        agent_cfg = OmegaConf.create(agent_cfg)
+def get_task_source(task_name: str) -> str:
+    """Determine if task is from IsaacLab or RLinf registry."""
+    from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
 
-    # Grab task name for checkpoint path
-    task_name = args_cli.task.split(":")[-1]
-    train_task_name = task_name.replace("-Play", "")
+    if task_name in REGISTER_ISAACLAB_ENVS:
+        return "rlinf"
+    return "isaaclab"
 
-    # Override configurations with CLI arguments
-    agent_cfg = cli_args.update_rlinf_cfg(agent_cfg, args_cli)
-    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
 
-    # Set the environment seed
-    seed = agent_cfg.get("seed", 42)
-    env_cfg.seed = seed
-    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+def register_isaaclab_task(task_id: str, agent_entry_point: str) -> None:
+    """Register an IsaacLab task into RLinf's registries."""
+    from isaaclab_rl.rlinf import RLinfPPORunnerCfg, register_task_for_rlinf
 
-    # Specify directory for logging experiments
-    experiment_name = agent_cfg.logger.get("experiment_name", "rlinf_experiment")
-    log_root_path = os.path.join("logs", "rlinf", experiment_name)
-    log_root_path = os.path.abspath(log_root_path)
-    print(f"[INFO] Loading experiment from directory: {log_root_path}")
-
-    # Get checkpoint path
-    if args_cli.use_pretrained_checkpoint:
-        print("[INFO] Pre-trained checkpoints are not yet available for RLinf.")
-        print("[INFO] Please specify a checkpoint path using --ckpt_path.")
-        return
-    elif args_cli.ckpt_path:
-        resume_path = retrieve_file_path(args_cli.ckpt_path)
-    elif args_cli.resume_dir:
-        resume_path = args_cli.resume_dir
-    else:
-        resume_path = get_checkpoint_path(
-            log_root_path,
-            agent_cfg.runner.get("load_run", None),
-            agent_cfg.runner.get("checkpoint", None),
-        )
-
-    if resume_path:
-        log_dir = os.path.dirname(resume_path)
-    else:
-        log_dir = os.path.join(log_root_path, datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_eval")
-
-    # Set the log directory for the environment
-    env_cfg.log_dir = log_dir
-
-    # Create Isaac environment using gym.make
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-
-    # Convert to single-agent instance if required
-    if isinstance(env.unwrapped, DirectMARLEnv):
-        env = multi_agent_to_single_agent(env)
-
-    # Get environment step dt for real-time evaluation
     try:
-        dt = env.step_dt
-    except AttributeError:
-        dt = env.unwrapped.step_dt
+        import gymnasium as gym
 
-    # Wrap for video recording
-    if args_cli.video:
-        video_kwargs = {
-            "video_folder": os.path.join(log_dir, "videos", "play"),
-            "step_trigger": lambda step: step == 0,
-            "video_length": args_cli.video_length,
-            "disable_logger": True,
-        }
-        print("[INFO] Recording videos during evaluation.")
-        print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+        if task_id not in gym.registry:
+            logger.warning(f"Task '{task_id}' not found in gymnasium registry")
+            return
 
-    # Get observation mapping from config
-    obs_map_cfg = agent_cfg.get("obs_map", {})
-    obs_keys_mapping = {}
-    if obs_map_cfg.get("main_images"):
-        obs_keys_mapping["main_images"] = obs_map_cfg.main_images
-    if obs_map_cfg.get("wrist_images"):
-        obs_keys_mapping["wrist_images"] = obs_map_cfg.wrist_images
+        task_spec = gym.registry[task_id]
+        if not task_spec.kwargs or agent_entry_point not in task_spec.kwargs:
+            logger.warning(f"Task '{task_id}' has no '{agent_entry_point}'")
+            return
 
-    state_keys = obs_map_cfg.get("state_keys", [])
-    task_description = agent_cfg.env.get("task_description", "")
+        entry_point = task_spec.kwargs[agent_entry_point]
+        if isinstance(entry_point, str):
+            module_name, class_name = entry_point.rsplit(":", 1)
+            import importlib
 
-    # Wrap environment for RLinf
-    env = RLinfVecEnvWrapper(
-        env,
-        task_description=task_description,
-        obs_keys_mapping=obs_keys_mapping,
-        state_keys=state_keys,
-        convert_quat_to_axisangle=obs_map_cfg.get("convert_quat_to_axisangle", True),
-    )
-
-    print(f"[INFO] Environment created with {env.num_envs} parallel environments.")
-    print(f"[INFO] Action dimension: {env.action_dim}")
-    print(f"[INFO] Device: {env.device}")
-
-    # Check if we should use RLinf's distributed evaluation
-    use_rlinf_distributed = (
-        agent_cfg.get("cluster", {}).get("num_nodes", 1) > 1
-        or len(agent_cfg.get("cluster", {}).get("component_placement", {})) > 1
-    )
-
-    if use_rlinf_distributed and resume_path:
-        print(f"\n[INFO] Starting RLinf distributed evaluation...")
-        print(f"[INFO] Loading checkpoint from: {resume_path}")
-
-        # Import RLinf components
-        from rlinf.config import validate_cfg
-        from rlinf.runners.embodied_eval_runner import EmbodiedEvalRunner
-        from rlinf.scheduler import Cluster
-        from rlinf.utils.placement import HybridComponentPlacement
-        from rlinf.workers.env.env_worker import EnvWorker
-        from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
-
-        # Close the environment we created (RLinf will create its own)
-        env.close()
-
-        # Build full RLinf config for evaluation
-        rlinf_cfg = OmegaConf.create({
-            "cluster": OmegaConf.to_container(agent_cfg.cluster, resolve=True),
-            "runner": {
-                **OmegaConf.to_container(agent_cfg.runner, resolve=True),
-                "only_eval": True,
-                "ckpt_path": resume_path,
-            },
-            "algorithm": OmegaConf.to_container(agent_cfg.algorithm, resolve=True),
-            "actor": {
-                "model": OmegaConf.to_container(agent_cfg.model, resolve=True),
-            },
-            "rollout": {
-                "group_name": "RolloutGroup",
-                "backend": "huggingface",
-                "model": {"model_path": resume_path},
-            },
-            "env": {
-                "group_name": "EnvGroup",
-                "train": {
-                    "env_type": "isaaclab",
-                    "total_num_envs": env_cfg.scene.num_envs,
-                    "init_params": {"id": args_cli.task},
-                },
-                "eval": {
-                    "env_type": "isaaclab",
-                    "total_num_envs": env_cfg.scene.num_envs,
-                    "init_params": {"id": args_cli.task},
-                    "video_cfg": {"save_video": args_cli.video},
-                },
-            },
-        })
-
-        # Validate and run evaluation
-        rlinf_cfg.runner.only_eval = True
-        rlinf_cfg = validate_cfg(rlinf_cfg)
-
-        cluster = Cluster(cluster_cfg=rlinf_cfg.cluster)
-        component_placement = HybridComponentPlacement(rlinf_cfg, cluster)
-
-        # Create worker groups for evaluation (no actor needed)
-        rollout_placement = component_placement.get_strategy("rollout")
-        rollout_group = MultiStepRolloutWorker.create_group(rlinf_cfg).launch(
-            cluster, name=rlinf_cfg.rollout.group_name, placement_strategy=rollout_placement
-        )
-
-        env_placement = component_placement.get_strategy("env")
-        env_group = EnvWorker.create_group(rlinf_cfg).launch(
-            cluster, name=rlinf_cfg.env.group_name, placement_strategy=env_placement
-        )
-
-        # Run evaluation
-        runner = EmbodiedEvalRunner(
-            cfg=rlinf_cfg,
-            rollout=rollout_group,
-            env=env_group,
-        )
-        runner.init_workers()
-        runner.run()
-
-    else:
-        # Simple evaluation loop (for testing and validation)
-        print("\n[INFO] Running simple evaluation loop...")
-
-        if resume_path:
-            print(f"[INFO] Loading checkpoint from: {resume_path}")
-
-            # Try to load the policy
-            try:
-                checkpoint = torch.load(resume_path, map_location=env.device)
-                print(f"[INFO] Checkpoint keys: {list(checkpoint.keys())}")
-
-                # For now, use random policy as placeholder
-                print("[WARNING] Using random policy - actual policy loading requires model definition.")
-                policy = lambda obs: torch.randn(env.num_envs, env.action_dim, device=env.device) * 0.1
-
-            except Exception as e:
-                print(f"[WARNING] Could not load checkpoint: {e}")
-                print("[INFO] Using random policy for validation.")
-                policy = lambda obs: torch.randn(env.num_envs, env.action_dim, device=env.device) * 0.1
+            module = importlib.import_module(module_name)
+            agent_cfg = getattr(module, class_name)()
         else:
-            print("[INFO] No checkpoint specified. Using random policy for validation.")
-            policy = lambda obs: torch.randn(env.num_envs, env.action_dim, device=env.device) * 0.1
+            agent_cfg = entry_point()
 
-        # Reset environment
-        obs, _ = env.reset()
-        timestep = 0
-        total_reward = torch.zeros(env.num_envs, device=env.device)
+        if not isinstance(agent_cfg, RLinfPPORunnerCfg):
+            agent_cfg = RLinfPPORunnerCfg()
 
-        # Simulate environment
-        while simulation_app.is_running():
-            start_time = time.time()
+        register_task_for_rlinf(task_id, agent_cfg)
 
-            # Run everything in inference mode
-            with torch.inference_mode():
-                # Get actions from policy
-                if isinstance(obs, dict) and "states" in obs:
-                    actions = policy(obs["states"])
-                else:
-                    actions = policy(obs)
+    except Exception as e:
+        logger.warning(f"Could not register task '{task_id}': {e}")
 
-                # Environment stepping
-                obs, rewards, terminated, truncated, info = env.step(actions)
-                total_reward += rewards
 
-            timestep += 1
+def find_or_create_config(task_id: str, args_cli) -> tuple[Path, str]:
+    """Find existing config or use default."""
+    script_dir = Path(__file__).parent.absolute()
+    repo_root = script_dir.parent.parent.parent.parent
+    config_path = repo_root / "examples" / "embodiment" / "config"
 
-            # Print progress
-            if timestep % 50 == 0:
-                print(f"  Step {timestep}: mean_reward={rewards.mean().item():.4f}, "
-                      f"total_reward={total_reward.mean().item():.4f}")
+    if args_cli.config_name:
+        return config_path, args_cli.config_name
 
-            # Check for video recording completion
-            if args_cli.video and timestep >= args_cli.video_length:
-                break
+    for config_file in config_path.glob("isaaclab*.yaml"):
+        with open(config_file) as f:
+            content = f.read()
+            if task_id in content:
+                return config_path, config_file.stem
 
-            # Check for episode completion (for non-video mode)
-            if not args_cli.video and (terminated | truncated).all():
-                print(f"\n[INFO] All episodes completed at step {timestep}")
-                break
+    default_config = "isaaclab_ppo_gr00t_install_trocar"
+    if (config_path / f"{default_config}.yaml").exists():
+        return config_path, default_config
 
-            # Time delay for real-time evaluation
-            sleep_time = dt - (time.time() - start_time)
-            if args_cli.real_time and sleep_time > 0:
-                time.sleep(sleep_time)
+    raise FileNotFoundError(f"No RLinf config found for task '{task_id}'")
 
-        # Print final metrics
-        if "episode" in info:
-            print("\n[INFO] Episode Metrics:")
-            for key, value in info["episode"].items():
-                if isinstance(value, torch.Tensor):
-                    print(f"  - {key}: {value.float().mean().item():.4f}")
 
-    # Close the simulator
-    env.close()
+def main():
+    """Launch RLinf evaluation."""
+    task_id = args_cli.task
+    task_source = get_task_source(task_id)
+    print(f"[INFO] Task '{task_id}' source: {task_source}")
+
+    # Register IsaacLab task if needed
+    if task_source == "isaaclab":
+        print(f"[INFO] Registering IsaacLab task '{task_id}' into RLinf...")
+        register_isaaclab_task(task_id, args_cli.agent)
+
+    # Find config
+    config_path, config_name = find_or_create_config(task_id, args_cli)
+    print(f"[INFO] Using config: {config_name}")
+
+    # Setup logging directory
+    timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
+    log_dir = Path("logs") / "rlinf" / "eval" / f"{timestamp}-{task_id.replace('/', '_')}"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] Logging to: {log_dir}")
+
+    # Initialize Hydra and load config
+    GlobalHydra.instance().clear()
+    initialize_config_dir(config_dir=str(config_path), version_base="1.1")
+    cfg = compose(config_name=config_name)
+
+    # Apply CLI overrides for evaluation
+    with open_dict(cfg):
+        # Set evaluation mode
+        cfg.runner.only_eval = True
+
+        # Set task ID (use eval variant if exists)
+        eval_task_id = task_id.replace("-v0", "-Eval-v0") if "-v0" in task_id else f"{task_id}-Eval"
+        cfg.env.eval.init_params.id = eval_task_id
+
+        # Set model path
+        cfg.rollout.model.model_path = args_cli.checkpoint
+
+        # Set logging
+        cfg.runner.logger.log_path = str(log_dir)
+
+        # Enable video saving
+        cfg.env.eval.video_cfg.save_video = True
+        cfg.env.eval.video_cfg.video_base_dir = str(log_dir / "videos")
+
+        # Apply CLI args
+        if args_cli.num_envs is not None:
+            cfg.env.eval.total_num_envs = args_cli.num_envs
+
+        cfg.actor.seed = args_cli.seed
+
+    cfg = validate_cfg(cfg)
+
+    # Print config summary
+    print("\n" + "=" * 60)
+    print("RLinf Evaluation Configuration")
+    print("=" * 60)
+    print(f"  Task: {cfg.env.eval.init_params.id}")
+    print(f"  Num envs: {cfg.env.eval.total_num_envs}")
+    print(f"  Checkpoint: {args_cli.checkpoint}")
+    print(f"  Videos: {cfg.env.eval.video_cfg.video_base_dir}")
+    print("=" * 60 + "\n")
+
+    # Save config
+    OmegaConf.save(cfg, log_dir / "config.yaml")
+    with open(log_dir / "config.json", "w") as f:
+        json.dump(OmegaConf.to_container(cfg, resolve=True), f, indent=2)
+
+    # Create cluster and workers
+    cluster = Cluster(cluster_cfg=cfg.cluster)
+    component_placement = HybridComponentPlacement(cfg, cluster)
+
+    # Create rollout worker
+    rollout_placement = component_placement.get_strategy("rollout")
+    rollout_group = MultiStepRolloutWorker.create_group(cfg).launch(
+        cluster, name=cfg.rollout.group_name, placement_strategy=rollout_placement
+    )
+
+    # Create env worker
+    env_placement = component_placement.get_strategy("env")
+    env_group = EnvWorker.create_group(cfg).launch(
+        cluster, name=cfg.env.group_name, placement_strategy=env_placement
+    )
+
+    # Run evaluation
+    runner = EmbodiedEvalRunner(
+        cfg=cfg,
+        rollout=rollout_group,
+        env=env_group,
+    )
+
+    runner.init_workers()
+    runner.run()
 
 
 if __name__ == "__main__":
-    # Set multiprocessing start method
-    mp.set_start_method("spawn", force=True)
-    # Run the main function
     main()
-    # Close sim app
-    simulation_app.close()

@@ -66,16 +66,76 @@ def add_rlinf_args(parser: argparse.ArgumentParser):
     )
 
 
-def update_rlinf_cfg(agent_cfg: "DictConfig", args_cli: argparse.Namespace) -> "DictConfig":
+def update_rlinf_cfg(agent_cfg, args_cli: argparse.Namespace):
     """Update configuration for RLinf agent based on CLI inputs.
 
+    Supports both OmegaConf DictConfig (for Hydra configs) and
+    dataclass configs (like RLinfPPORunnerCfg).
+
     Args:
-        agent_cfg: The configuration for RLinf agent.
+        agent_cfg: The configuration for RLinf agent (DictConfig or dataclass).
         args_cli: The command line arguments.
 
     Returns:
         The updated configuration for RLinf agent based on inputs.
     """
+    from dataclasses import is_dataclass
+    
+    # Check if it's a dataclass (IsaacLab style) or DictConfig (Hydra style)
+    if is_dataclass(agent_cfg):
+        return _update_dataclass_cfg(agent_cfg, args_cli)
+    else:
+        return _update_omegaconf_cfg(agent_cfg, args_cli)
+
+
+def _update_dataclass_cfg(agent_cfg, args_cli: argparse.Namespace):
+    """Update dataclass configuration (RLinfPPORunnerCfg style)."""
+    # Override seed
+    if hasattr(args_cli, "seed") and args_cli.seed is not None:
+        if args_cli.seed == -1:
+            args_cli.seed = random.randint(0, 10000)
+        agent_cfg.seed = args_cli.seed
+
+    # Override environment settings
+    if hasattr(args_cli, "num_envs") and args_cli.num_envs is not None:
+        agent_cfg.env.total_num_envs = args_cli.num_envs
+
+    # Override runner settings
+    if args_cli.resume:
+        agent_cfg.runner.resume = True
+    if args_cli.resume_dir is not None:
+        agent_cfg.runner.resume_dir = args_cli.resume_dir
+    if args_cli.ckpt_path is not None:
+        agent_cfg.runner.ckpt_path = args_cli.ckpt_path
+    if args_cli.only_eval:
+        agent_cfg.runner.only_eval = True
+
+    # Override experiment name
+    if args_cli.experiment_name is not None:
+        agent_cfg.logger.experiment_name = args_cli.experiment_name
+    if args_cli.run_name is not None:
+        if hasattr(agent_cfg.logger, "run_name"):
+            agent_cfg.logger.run_name = args_cli.run_name
+
+    # Override logger settings
+    if args_cli.logger is not None:
+        agent_cfg.logger.logger_backends = [args_cli.logger]
+    if args_cli.log_project_name is not None:
+        agent_cfg.logger.project_name = args_cli.log_project_name
+
+    # Override max iterations
+    if hasattr(args_cli, "max_iterations") and args_cli.max_iterations is not None:
+        agent_cfg.runner.max_epochs = args_cli.max_iterations
+
+    # Override cluster settings
+    if args_cli.num_nodes is not None:
+        agent_cfg.cluster.num_nodes = args_cli.num_nodes
+
+    return agent_cfg
+
+
+def _update_omegaconf_cfg(agent_cfg, args_cli: argparse.Namespace):
+    """Update OmegaConf DictConfig configuration (Hydra style)."""
     from omegaconf import open_dict
 
     with open_dict(agent_cfg):

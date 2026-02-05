@@ -2,6 +2,6 @@
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""RLinf agent configurations for IsaacLab tasks."""
+"""Agent configurations for Install Trocar task with G129 + Dex3."""
 
-from .rlinf_install_trocar_cfg import *
+from .rlinf_ppo_cfg import RLinfInstallTrocarPPOCfg
