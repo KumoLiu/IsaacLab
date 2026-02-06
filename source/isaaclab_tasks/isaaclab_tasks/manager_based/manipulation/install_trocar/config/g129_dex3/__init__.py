@@ -32,8 +32,8 @@ gym.register(
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
         "env_cfg_entry_point": rlinf_env_cfg.G1InstallTrocarEnvCfg,
-        # RLinf agent configuration for VLA post-training
-        "rlinf_cfg_entry_point": f"{agents.__name__}:RLinfInstallTrocarPPOCfg",
+        # # RLinf agent configuration for VLA post-training
+        # "rlinf_cfg_entry_point": f"{agents.__name__}:RLinfInstallTrocarPPOCfg",
     },
     disable_env_checker=True,
 )
@@ -43,8 +43,6 @@ gym.register(
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
         "env_cfg_entry_point": rlinf_env_cfg.G1InstallTrocarEvalEnvCfg,
-        # RLinf agent configuration for VLA post-training
-        "rlinf_cfg_entry_point": f"{agents.__name__}:RLinfInstallTrocarPPOCfg",
     },
     disable_env_checker=True,
 )

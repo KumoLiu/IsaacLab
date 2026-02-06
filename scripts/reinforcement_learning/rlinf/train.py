@@ -25,6 +25,7 @@ Note:
     The model_path should point to a HuggingFace format checkpoint directory.
 """
 
+import os
 import argparse
 import json
 import sys
@@ -66,31 +67,15 @@ if args_cli.list_tasks:
     except ImportError:
         print("  (Could not import RLinf registry)")
 
-    # List IsaacLab registered tasks with rlinf_cfg_entry_point
-    print("\n[IsaacLab Tasks with rlinf_cfg_entry_point]")
-    print("  (Requires IsaacLab simulator - cannot list without launching)")
-    print("  Known tasks:")
-    print("  - Isaac-Install-Trocar-G129-Dex3-RLinf-v0")
-    print("  - Isaac-Install-Trocar-G129-Dex3-RLinf-Eval-v0")
-    print("")
-    print("  To add your task, register with 'rlinf_cfg_entry_point' in gym.register()")
-
     print("\n" + "=" * 60)
     sys.exit(0)
 
-# Validate arguments
-if args_cli.task is None:
-    print("[ERROR] Please specify a task with --task")
-    print("[INFO] Use --list_tasks to see available tasks")
-    sys.exit(1)
-
-if args_cli.model_path is None:
-    print("[ERROR] Please specify a model checkpoint with --model_path")
-    print("[INFO] RLinf training requires a pretrained VLA model (e.g., GR00T)")
-    sys.exit(1)
+# task is optional if RLINF_CONFIG_FILE is set (task_id comes from YAML)
+# model_path is also optional if set in YAML
 
 """Rest of the script - launch RLinf training."""
 
+import os
 import logging
 import torch.multiprocessing as mp
 
@@ -110,91 +95,41 @@ logger = logging.getLogger(__name__)
 mp.set_start_method("spawn", force=True)
 
 
-def get_task_source(task_name: str) -> tuple[str, bool]:
-    """Determine task source and availability.
+def get_config_path_and_name(args_cli) -> tuple[Path, str]:
+    """Get config path and name.
     
-    Returns:
-        Tuple of (source_description, is_available)
+    Priority:
+    1. RLINF_CONFIG_FILE environment variable (full path, set by run.sh)
+    2. CLI --config_name argument (looks in rlinf/config directory)
     """
-    import os
-    from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
-
-    # Check if already in RLinf registry
-    if task_name in REGISTER_ISAACLAB_ENVS:
-        return "rlinf", True
-
-    # Check if task has rlinf_cfg_entry_point (will be auto-registered via extension)
-    try:
-        import gymnasium as gym
-        if task_name in gym.registry:
-            task_spec = gym.registry[task_name]
-            if task_spec.kwargs and "rlinf_cfg_entry_point" in task_spec.kwargs:
-                return "isaaclab (auto-register via RLINF_EXT_MODULE)", True
-    except Exception:
-        pass
-
-    # If RLINF_EXT_MODULE is set and task looks like an IsaacLab task,
-    # trust that it will be auto-registered when Workers start
-    # (isaaclab_tasks can't be fully imported without Omniverse running)
-    if os.environ.get("RLINF_EXT_MODULE") and task_name.startswith("Isaac-"):
-        return "isaaclab (will be auto-registered by extension)", True
-
-    return "unknown", False
-
-
-def find_or_create_config(task_id: str, args_cli) -> tuple[Path, str]:
-    """Find existing config or create a new one for the task.
-
-    Returns:
-        Tuple of (config_path, config_name)
-    """
-    # Look for existing config in examples/embodiment/config
+    config_file = os.environ.get("RLINF_CONFIG_FILE", "")
+    if config_file:
+        return Path(config_file).parent, Path(config_file).stem
+    
     script_dir = Path(__file__).parent.absolute()
-    repo_root = script_dir.parent.parent.parent.parent
-    config_path = repo_root / "examples" / "embodiment" / "config"
+    config_path = script_dir / "config"
 
     if args_cli.config_name:
         return config_path, args_cli.config_name
 
-    # Search for matching config
-    for config_file in config_path.glob("isaaclab*.yaml"):
-        with open(config_file) as f:
-            content = f.read()
-            if task_id in content:
-                return config_path, config_file.stem
-
-    # Use default config
-    default_config = "isaaclab_ppo_gr00t_install_trocar"
-    if (config_path / f"{default_config}.yaml").exists():
-        logger.info(f"No specific config for '{task_id}', using '{default_config}'")
-        return config_path, default_config
-
-    raise FileNotFoundError(f"No RLinf config found for task '{task_id}' and no default available")
+    raise FileNotFoundError("No config found. Set RLINF_CONFIG_FILE or --config_name")
 
 
 def main():
     """Launch RLinf training."""
-    task_id = args_cli.task
-    task_source, is_available = get_task_source(task_id)
-    print(f"[INFO] Task '{task_id}' source: {task_source}")
-
-    if not is_available:
-        print(f"[ERROR] Task '{task_id}' not found")
-        print("  Options:")
-        print("  1. Use a task registered in RLinf's REGISTER_ISAACLAB_ENVS")
-        print("  2. Register your IsaacLab task with rlinf_cfg_entry_point")
-        print("     and ensure RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension is set")
-        print("")
-        print("  Available RLinf tasks:")
-        from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
-        for t in sorted(REGISTER_ISAACLAB_ENVS.keys()):
-            print(f"    - {t}")
-        sys.exit(1)
-
-    # Find or create config
-    config_path, config_name = find_or_create_config(task_id, args_cli)
+    # Get config (task_id is read from YAML)
+    config_path, config_name = get_config_path_and_name(args_cli)
     print(f"[INFO] Using config: {config_name}")
     print(f"[INFO] Config path: {config_path}")
+
+    # Initialize Hydra and load config
+    GlobalHydra.instance().clear()
+    initialize_config_dir(config_dir=str(config_path), version_base="1.1")
+    cfg = compose(config_name=config_name)
+
+    # Get task_id from config
+    task_id = cfg.env.train.init_params.id
+    print(f"[INFO] Task: {task_id}")
 
     # Setup logging directory
     timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
@@ -202,37 +137,12 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
-    # Initialize Hydra and load config
-    GlobalHydra.instance().clear()
-    initialize_config_dir(config_dir=str(config_path), version_base="1.1")
-    cfg = compose(config_name=config_name)
-
-    # Apply CLI overrides
+    # Apply runtime overrides
     with open_dict(cfg):
-        # Set task ID
-        cfg.env.train.init_params.id = task_id
-        cfg.env.eval.init_params.id = task_id.replace("-v0", "-Eval-v0") if "-v0" in task_id else f"{task_id}-Eval"
-
-        # Set model path
-        cfg.actor.model.model_path = args_cli.model_path
-        cfg.rollout.model.model_path = args_cli.model_path
-
-        # Set logging
         cfg.runner.logger.log_path = str(log_dir)
-
-        # Apply other CLI args
-        if args_cli.num_envs is not None:
-            cfg.env.train.total_num_envs = args_cli.num_envs
-            cfg.env.eval.total_num_envs = args_cli.num_envs
-
-        if args_cli.max_iterations is not None:
-            cfg.runner.max_epochs = args_cli.max_iterations
-
-        cfg.actor.seed = args_cli.seed
-
+        
         if args_cli.only_eval:
             cfg.runner.only_eval = True
-
         if args_cli.resume_dir:
             cfg.runner.resume_dir = args_cli.resume_dir
 

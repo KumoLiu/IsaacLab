@@ -30,17 +30,9 @@ echo "=========================================="
 echo "RLinf IsaacLab Training"
 echo "=========================================="
 
-# Setup environment variables
-export MUJOCO_GL="osmesa"
-export PYOPENGL_PLATFORM="osmesa"
-
 # Accept Omniverse EULA automatically (required for non-interactive mode)
 export OMNI_KIT_ACCEPT_EULA="YES"
 export ACCEPT_EULA="Y"
-
-# Disable USD plugin preloading (helps with multiprocess issues)
-export PXR_PLUGINPATH_NAME=""
-export USD_DISABLE_PRELOAD="1"
 
 # Ensure clean subprocess environment for Isaac Sim
 export OMNI_KIT_ALLOW_ROOT="1"
@@ -61,19 +53,33 @@ export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 # This allows tasks registered with rlinf_cfg_entry_point to be auto-registered
 export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
 
-# Extract --task argument and set configuration environment variables
+# Extract --task and --config_name arguments
 # This follows i4h's pattern: config paths are passed via env vars, not gym.registry
 args=("$@")
 task=""
+config_name=""
 for ((i=0; i<${#args[@]}; i++)); do
     if [[ "${args[$i]}" == "--task" ]] && [[ $((i+1)) -lt ${#args[@]} ]]; then
         task="${args[$((i+1))]}"
-        break
     elif [[ "${args[$i]}" == --task=* ]]; then
         task="${args[$i]#*=}"
-        break
+    elif [[ "${args[$i]}" == "--config_name" ]] && [[ $((i+1)) -lt ${#args[@]} ]]; then
+        config_name="${args[$((i+1))]}"
+    elif [[ "${args[$i]}" == --config_name=* ]]; then
+        config_name="${args[$i]#*=}"
     fi
 done
+
+# Default config name if not provided
+if [ -z "$config_name" ]; then
+    CONFIG_NAME="isaaclab_ppo_gr00t_install_trocar"
+else
+    CONFIG_NAME="$config_name"
+fi
+
+# Export config name for train.py to use
+export RLINF_CONFIG_NAME="$CONFIG_NAME"
+echo "RLINF_CONFIG_NAME=${CONFIG_NAME}"
 
 if [ -n "$task" ]; then
     # Set task IDs for registration (train + eval variants)
@@ -85,50 +91,15 @@ if [ -n "$task" ]; then
     export RLINF_ISAACLAB_TASKS="$task,$eval_task"
     echo "RLINF_ISAACLAB_TASKS=${RLINF_ISAACLAB_TASKS}"
 
-    # Set config entry points based on task name
-    # obs_map JSON format:
-    #   main_images: single camera key for main view
-    #   extra_view_images: list of camera keys to stack as (B, N, H, W, C)
-    #   states: list of state specs, each can be:
-    #     - string: "key_name" (use full tensor)
-    #     - dict: {"key": "key_name", "slice": [start, end]} (use slice)
-    #   gr00t_mapping: how to convert _wrap_obs output to GR00T format
-    #     - video: map main_images/extra_view_images to video.xxx keys
-    #     - state: list of {gr00t_key, slice} to slice states into GR00T state keys
-    #   action_mapping: how to convert GR00T actions back to env format
-    #     - prefix_pad: padding at front (e.g., 15 for G129 body joints)
-    case "$task" in
-        Isaac-Install-Trocar-G129-Dex3-RLinf-v0|Isaac-Install-Trocar-G129-Dex3-RLinf-Eval-v0)
-            # G129 + Dex3 task: same mapping as i4h's rlinf_ext
-            # states: g129_shoulder[15:29] (14) + dex3 (14) = 28 dims
-            # GR00T needs: left_arm[0:7], right_arm[7:14], left_hand[14:21], right_hand[21:28]
-            
-            # Observation mapping: IsaacLab -> RLinf -> GR00T
-            export RLINF_OBS_MAP_JSON='{"main_images":"front_camera","extra_view_images":["left_wrist_camera","right_wrist_camera"],"states":[{"key":"robot_joint_state","slice":[15,29]},{"key":"robot_dex3_joint_state"}],"gr00t_mapping":{"video":{"main_images":"video.room_view","extra_view_images":["video.left_wrist_view","video.right_wrist_view"]},"state":[{"gr00t_key":"state.left_arm","slice":[0,7]},{"gr00t_key":"state.right_arm","slice":[7,14]},{"gr00t_key":"state.left_hand","slice":[14,21]},{"gr00t_key":"state.right_hand","slice":[21,28]}]},"action_mapping":{"prefix_pad":15}}'
-            export RLINF_TASK_DESCRIPTION="install trocar from box"
-            export RLINF_CONVERTER_TYPE="isaaclab"
-            
-            # Model patch: custom embodiment support
-            # Uses local policy/gr00t_config.py for data configuration
-            export RLINF_EMBODIMENT_TAG="new_embodiment"
-            export RLINF_EMBODIMENT_TAG_ID="31"
-            export RLINF_DATA_CONFIG="policy.gr00t_config"
-            export RLINF_DATA_CONFIG_CLASS="policy.gr00t_config:IsaacLabDataConfig"
-            
-            echo "Using IsaacLab config for $task"
-            echo "  RLINF_CONVERTER_TYPE=${RLINF_CONVERTER_TYPE}"
-            echo "  RLINF_EMBODIMENT_TAG=${RLINF_EMBODIMENT_TAG}"
-            echo "  NOTE: Set obs_converter_type='isaaclab' and embodiment_tag='new_embodiment' in YAML"
-            ;;
-        Isaac-Install-Trocar-G129-Dex3-Joint|Isaac-Install-Trocar-G129-Dex3-Joint-Eval)
-            # RLinf native task - no need to set config, handled by RLinf internally
-            echo "Using RLinf native task: $task"
-            ;;
-        *)
-            # Unknown task - try to auto-detect or use defaults
-            echo "Unknown task: $task - will attempt auto-detection"
-            ;;
-    esac
+    # Export YAML config file path - all config is read from this file
+    # (embodiment_tag, gr00t_mapping, action_mapping, etc. are all in YAML)
+    export RLINF_CONFIG_FILE="${REPO_ROOT}/examples/embodiment/config/${CONFIG_NAME}.yaml"
+    echo "RLINF_CONFIG_FILE=${RLINF_CONFIG_FILE}"
+    
+    if [ ! -f "$RLINF_CONFIG_FILE" ]; then
+        echo "ERROR: Config file not found: $RLINF_CONFIG_FILE"
+        exit 1
+    fi
 fi
 
 # Setup Isaac Sim paths (for container environments)

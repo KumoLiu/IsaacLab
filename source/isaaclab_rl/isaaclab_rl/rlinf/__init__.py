@@ -16,13 +16,6 @@ Usage:
     # Specify tasks to register
     export RLINF_ISAACLAB_TASKS="Isaac-MyTask-v0"
     
-    # Configure observation mapping (JSON format)
-    export RLINF_OBS_MAP_JSON='{"main_images":"camera","states":["joint_pos"]}'
-    
-    # Configure GR00T model patch (optional)
-    export RLINF_EMBODIMENT_TAG="new_embodiment"
-    export RLINF_DATA_CONFIG_CLASS="policy.gr00t_config:MyDataConfig"
-
 The extension module (extension.py) handles:
     1. Registering IsaacLab tasks into RLinf's REGISTER_ISAACLAB_ENVS
     2. Registering GR00T obs/action converters

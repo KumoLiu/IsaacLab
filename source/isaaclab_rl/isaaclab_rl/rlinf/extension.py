@@ -10,20 +10,42 @@ RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension is set in the environment.
 It registers IsaacLab tasks into RLinf's registries, allowing IsaacLab users
 to train on their tasks without modifying RLinf source code.
 
+Configuration is read from the Hydra YAML config under `env.train.isaaclab`:
+    env:
+      train:
+        isaaclab: &isaaclab_config  # YAML anchor for reuse
+          task_description: "..."
+          main_images: "front_camera"
+          extra_view_images: ["left_wrist_camera", "right_wrist_camera"]
+          states:
+            - key: "robot_joint_state"
+              slice: [15, 29]
+          gr00t_mapping:
+            video:
+              main_images: "video.room_view"
+              ...
+          action_mapping:
+            prefix_pad: 15
+      eval:
+        isaaclab: *isaaclab_config  # Reuse via YAML anchor
+
 Usage:
     # Set the extension module and task to register
     export RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension
     export RLINF_ISAACLAB_TASKS="Isaac-Install-Trocar-G129-Dex3-RLinf-v0"
-    
-    # For multiple tasks, separate with comma:
-    export RLINF_ISAACLAB_TASKS="Isaac-Task1-v0,Isaac-Task2-v0"
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import yaml
+import torch
+import numpy as np
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from enum import Enum
+from rlinf.models.embodiment.gr00t import embodiment_tags
 
 if TYPE_CHECKING:
     import torch
@@ -32,9 +54,8 @@ logger = logging.getLogger(__name__)
 
 _registered = False
 
-# Module-level config cache (shared across all dynamically created classes)
-_shared_obs_map: dict | None = None
-_shared_task_description = ""
+# Cache for YAML config (loaded once per process)
+_isaaclab_cfg_cache: dict | None = None
 
 
 def register() -> None:
@@ -45,8 +66,8 @@ def register() -> None:
 
     It performs the following registrations:
     1. Registers GR00T obs/action converters
-    2. Registers GR00T data config (if RLINF_DATA_CONFIG is set)
-    3. Patches GR00T get_model for custom embodiment (if RLINF_EMBODIMENT_TAG is set)
+    2. Registers GR00T data config
+    3. Patches GR00T get_model for custom embodiment
     4. Registers task IDs from RLINF_ISAACLAB_TASKS env var into REGISTER_ISAACLAB_ENVS
     """
     global _registered
@@ -55,59 +76,56 @@ def register() -> None:
     _registered = True
 
     logger.info("isaaclab_rl.rlinf.extension: Registering IsaacLab extensions...")
-
-    _register_gr00t_converters()
-    _register_gr00t_data_config()
-    _patch_gr00t_get_model()
+    
+    # Load config once and pass to all registration functions
+    cfg = _get_isaaclab_cfg()
+    
+    _register_gr00t_converters(cfg)
+    _patch_gr00t_get_model(cfg)
     _register_isaaclab_envs()
 
     logger.info("isaaclab_rl.rlinf.extension: Registration complete.")
 
 
-def _register_gr00t_data_config() -> None:
-    """Register GR00T data config for custom embodiment.
+def _get_isaaclab_cfg() -> dict:
+    """Get IsaacLab config by reading YAML file from RLINF_CONFIG_FILE env var.
     
-    Set RLINF_DATA_CONFIG to specify the data config module path.
-    Example: export RLINF_DATA_CONFIG="policy.gr00t_config"
-    
-    This imports the module which should add to DATA_CONFIG_MAP.
+    Reads `env.train.isaaclab` section from the YAML config file.
+    Result is cached to avoid re-reading the file on every call.
     """
-    data_config_module = os.environ.get("RLINF_DATA_CONFIG", "")
-    if not data_config_module:
-        logger.debug("RLINF_DATA_CONFIG not set, skipping data config registration")
-        return
+    global _isaaclab_cfg_cache
     
-    try:
-        import importlib
-        importlib.import_module(data_config_module)
-        logger.info(f"Registered GR00T data config from: {data_config_module}")
-    except ImportError as e:
-        logger.warning(f"Failed to import data config module '{data_config_module}': {e}")
+    if _isaaclab_cfg_cache is not None:
+        return _isaaclab_cfg_cache
+    
+    config_file = os.environ.get("RLINF_CONFIG_FILE", "")
+    if not config_file:
+        raise ValueError("RLINF_CONFIG_FILE not set")
+    
+    with open(config_file) as f:
+        full_cfg = yaml.safe_load(f)
+    _isaaclab_cfg_cache = full_cfg.get("env", {}).get("train", {}).get("isaaclab", {})
+    logger.info(f"Loaded isaaclab config from {config_file}: {list(_isaaclab_cfg_cache.keys())}")
+    return _isaaclab_cfg_cache
 
 
-def _patch_embodiment_tags() -> None:
-    """Add custom embodiment tag to RLinf's EmbodimentTag enum and mapping.
+def _patch_embodiment_tags(cfg: dict) -> None:
+    """Add custom embodiment tag to RLinf's EmbodimentTag enum and mapping if needed.
     
-    Set RLINF_EMBODIMENT_TAG to specify the embodiment tag name.
-    Set RLINF_EMBODIMENT_TAG_ID to specify the tag ID (default: 31).
-    
-    Example:
-        export RLINF_EMBODIMENT_TAG="new_embodiment"
-        export RLINF_EMBODIMENT_TAG_ID="31"
+    Reads from YAML config (env.train.isaaclab.embodiment_tag and embodiment_tag_id).
+    Only adds tag if not already in RLinf's native registry.
     """
-    from rlinf.models.embodiment.gr00t import embodiment_tags
+    embodiment_tag = cfg.get("embodiment_tag", "new_embodiment")
+    tag_id = cfg.get("embodiment_tag_id", 31)
     
-    embodiment_tag = os.environ.get("RLINF_EMBODIMENT_TAG", "")
-    if not embodiment_tag:
+    # If tag is already in registry (native or previously added), skip
+    if embodiment_tag in embodiment_tags.EMBODIMENT_TAG_MAPPING:
+        logger.info(f"embodiment_tag '{embodiment_tag}' already registered")
         return
     
-    tag_id = int(os.environ.get("RLINF_EMBODIMENT_TAG_ID", "31"))
-    
-    # Add to enum if not exists
+    # Add to enum
     tag_upper = embodiment_tag.upper().replace("-", "_")
     if not hasattr(embodiment_tags.EmbodimentTag, tag_upper):
-        from enum import Enum
-        
         existing_members = {e.name: e.value for e in embodiment_tags.EmbodimentTag}
         existing_members[tag_upper] = embodiment_tag
         NewEmbodimentTag = Enum("EmbodimentTag", existing_members)
@@ -115,48 +133,41 @@ def _patch_embodiment_tags() -> None:
         embodiment_tags.EmbodimentTag = NewEmbodimentTag
         logger.info(f"Added EmbodimentTag.{tag_upper} = '{embodiment_tag}'")
     
-    # Add to mapping if not exists
-    if embodiment_tag not in embodiment_tags.EMBODIMENT_TAG_MAPPING:
-        embodiment_tags.EMBODIMENT_TAG_MAPPING[embodiment_tag] = tag_id
-        logger.info(f"Added EMBODIMENT_TAG_MAPPING['{embodiment_tag}'] = {tag_id}")
+    # Add to mapping
+    embodiment_tags.EMBODIMENT_TAG_MAPPING[embodiment_tag] = tag_id
+    logger.info(f"Added EMBODIMENT_TAG_MAPPING['{embodiment_tag}'] = {tag_id}")
 
 
-def _patch_gr00t_get_model() -> None:
-    """Monkeypatch RLinf's GR00T get_model to support custom embodiment.
+def _patch_gr00t_get_model(cfg: dict) -> None:
+    """Monkeypatch RLinf's GR00T get_model to support custom data_config.
     
-    Required environment variables:
-        RLINF_EMBODIMENT_TAG: The embodiment tag name (e.g., "new_embodiment")
-        RLINF_DATA_CONFIG_CLASS: Full path to data config class 
-                                 (e.g., "policy.gr00t_config:UnitreeG1SimDataConfig")
-    
-    If RLINF_EMBODIMENT_TAG is not set, this function does nothing.
+    Patch is needed if user specifies a custom data_config_class.
+    Also ensures embodiment_tag is registered.
     """
-    embodiment_tag = os.environ.get("RLINF_EMBODIMENT_TAG", "")
-    if not embodiment_tag:
-        logger.debug("RLINF_EMBODIMENT_TAG not set, skipping get_model patch")
-        return
+    # Always ensure embodiment tag is registered
+    _patch_embodiment_tags(cfg)
     
-    # First patch the embodiment tags
-    _patch_embodiment_tags()
+    # Only patch get_model if user wants custom data_config
+    data_config_class = cfg.get("data_config_class", "")
+    if not data_config_class:
+        logger.info("No data_config_class specified, using RLinf's default get_model")
+        return
     
     import rlinf.models.embodiment.gr00t as rlinf_gr00t_mod
     
     original_get_model = rlinf_gr00t_mod.get_model
-    _embodiment_tag = embodiment_tag  # Capture for closure
     
-    def patched_get_model(cfg, torch_dtype=None):
-        import torch
+    # Capture for closure
+    _embodiment_tag = cfg.get("embodiment_tag", "new_embodiment")
+    _data_config_class = data_config_class
+    
+    def patched_get_model(model_cfg, torch_dtype=None):
+        
         
         if torch_dtype is None:
             torch_dtype = torch.bfloat16
         
-        # If not our custom embodiment, use original logic
-        if cfg.embodiment_tag != _embodiment_tag:
-            return original_get_model(cfg, torch_dtype=torch_dtype)
-        
-        # Handle custom embodiment
-        from pathlib import Path
-        
+        # Handle custom embodiment (we only get here if tag was not natively supported)
         from gr00t.experiment.data_config import load_data_config
         from rlinf.models.embodiment.gr00t.gr00t_action_model import GR00T_N1_5_ForRLActionPrediction
         from rlinf.models.embodiment.gr00t.utils import replace_dropout_with_identity
@@ -174,107 +185,75 @@ def _patch_gr00t_get_model() -> None:
         )
         Patcher.apply()
         
-        # Load data config
-        data_config_class = os.environ.get("RLINF_DATA_CONFIG_CLASS", "")
-        if not data_config_class:
-            raise ValueError(
-                f"RLINF_DATA_CONFIG_CLASS must be set for embodiment_tag='{_embodiment_tag}'. "
-                f"Example: export RLINF_DATA_CONFIG_CLASS='policy.gr00t_config:UnitreeG1SimDataConfig'"
-            )
-        
-        data_config = load_data_config(data_config_class)
+        data_config = load_data_config(_data_config_class)
         modality_config = data_config.modality_config()
         modality_transform = data_config.transform()
         
-        model_path = Path(cfg.model_path)
+        model_path = Path(model_cfg.model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model path does not exist: {model_path}")
         
         model = GR00T_N1_5_ForRLActionPrediction.from_pretrained(
             model_path,
             torch_dtype=torch_dtype,
-            embodiment_tag=cfg.embodiment_tag,
+            embodiment_tag=model_cfg.embodiment_tag,
             modality_config=modality_config,
             modality_transform=modality_transform,
-            denoising_steps=cfg.denoising_steps,
-            output_action_chunks=cfg.num_action_chunks,
-            obs_converter_type=cfg.obs_converter_type,
+            denoising_steps=model_cfg.denoising_steps,
+            output_action_chunks=model_cfg.num_action_chunks,
+            obs_converter_type=model_cfg.obs_converter_type,
             tune_visual=False,
             tune_llm=False,
-            rl_head_config=cfg.rl_head_config,
+            rl_head_config=model_cfg.rl_head_config,
         )
         model.to(torch_dtype)
         
-        if cfg.rl_head_config.add_value_head:
+        if model_cfg.rl_head_config.add_value_head:
             model.action_head.value_head._init_weights()
-        if cfg.rl_head_config.disable_dropout:
+        if model_cfg.rl_head_config.disable_dropout:
             replace_dropout_with_identity(model)
         
-        logger.info(f"Loaded GR00T model with embodiment_tag='{cfg.embodiment_tag}'")
+        logger.info(f"Loaded GR00T model with embodiment_tag='{model_cfg.embodiment_tag}'")
         return model
     
     rlinf_gr00t_mod.get_model = patched_get_model
-    logger.info(f"Patched get_model for embodiment_tag='{embodiment_tag}'")
+    logger.info(f"Patched get_model for embodiment_tag='{_embodiment_tag}'")
 
 
-def _register_gr00t_converters() -> None:
+def _register_gr00t_converters(cfg: dict) -> None:
     """Register GR00T obs/action converters for IsaacLab tasks.
     
-    This registers a generic "isaaclab" converter that uses the gr00t_mapping
-    from RLINF_OBS_MAP_JSON to convert observations and actions.
+    Reads obs_converter_type from YAML config (env.train.isaaclab.obs_converter_type).
     """
     from rlinf.models.embodiment.gr00t import simulation_io
 
-    # Register the generic IsaacLab converter
-    converter_type = os.environ.get("RLINF_CONVERTER_TYPE", "isaaclab")
+    obs_converter_type = cfg.get("obs_converter_type", "isaaclab")
     
-    if converter_type not in simulation_io.OBS_CONVERSION:
-        simulation_io.OBS_CONVERSION[converter_type] = _convert_isaaclab_obs_to_gr00t
-        logger.info(f"Registered obs converter: {converter_type}")
+    if obs_converter_type not in simulation_io.OBS_CONVERSION:
+        simulation_io.OBS_CONVERSION[obs_converter_type] = _convert_isaaclab_obs_to_gr00t
+        logger.info(f"Registered obs converter: {obs_converter_type}")
     
-    if converter_type not in simulation_io.ACTION_CONVERSION:
-        simulation_io.ACTION_CONVERSION[converter_type] = _convert_gr00t_to_isaaclab_action
-        logger.info(f"Registered action converter: {converter_type}")
+    if obs_converter_type not in simulation_io.ACTION_CONVERSION:
+        simulation_io.ACTION_CONVERSION[obs_converter_type] = _convert_gr00t_to_isaaclab_action
+        logger.info(f"Registered action converter: {obs_converter_type}")
 
 
 def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
     """Convert IsaacLab env observations to GR00T format.
     
-    Uses gr00t_mapping from RLINF_OBS_MAP_JSON to configure the conversion.
+    Uses gr00t_mapping from YAML config (cfg.env.isaaclab.gr00t_mapping).
     
     Expected input (from _wrap_obs):
       - main_images: (B, H, W, C) torch tensor
       - extra_view_images: (B, N, H, W, C) torch tensor
       - states: (B, D) torch tensor
       - task_descriptions: list[str]
-    
-    gr00t_mapping config example:
-      {
-        "video": {
-          "main_images": "video.room_view",
-          "extra_view_images": ["video.left_wrist_view", "video.right_wrist_view"]
-        },
-        "state": [
-          {"gr00t_key": "state.left_arm", "slice": [0, 7]},
-          {"gr00t_key": "state.right_arm", "slice": [7, 14]},
-          {"gr00t_key": "state.left_hand", "slice": [14, 21]},
-          {"gr00t_key": "state.right_hand", "slice": [21, 28]}
-        ]
-      }
     """
-    import json
-    import torch
-    
     groot_obs = {}
     
-    # Load mapping config
-    obs_map_json = os.environ.get("RLINF_OBS_MAP_JSON", "{}")
-    try:
-        obs_map = json.loads(obs_map_json)
-    except json.JSONDecodeError:
-        obs_map = {}
-    
-    gr00t_mapping = obs_map.get("gr00t_mapping", {})
+    # Load mapping config from YAML or env var
+    cfg = _get_isaaclab_cfg()
+    gr00t_mapping = cfg.get("gr00t_mapping", {})
     video_mapping = gr00t_mapping.get("video", {})
     state_mapping = gr00t_mapping.get("state", [])
     
@@ -316,25 +295,12 @@ def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
 def _convert_gr00t_to_isaaclab_action(action_chunk: dict, chunk_size: int = 1) -> Any:
     """Convert GR00T action output to IsaacLab env action format.
     
-    Uses action_mapping from RLINF_OBS_MAP_JSON to configure the conversion.
-    
-    action_mapping config example:
-      {
-        "prefix_pad": 15,  # Pad zeros at front (for G129 body joints)
-        "suffix_pad": 0    # Pad zeros at end
-      }
+    Uses action_mapping from YAML config (cfg.env.isaaclab.action_mapping).
     """
-    import json
-    import numpy as np
     
-    # Load mapping config
-    obs_map_json = os.environ.get("RLINF_OBS_MAP_JSON", "{}")
-    try:
-        obs_map = json.loads(obs_map_json)
-    except json.JSONDecodeError:
-        obs_map = {}
-    
-    action_mapping = obs_map.get("action_mapping", {})
+    # Load mapping config from YAML or env var
+    cfg = _get_isaaclab_cfg()
+    action_mapping = cfg.get("action_mapping", {})
     prefix_pad = action_mapping.get("prefix_pad", 0)
     suffix_pad = action_mapping.get("suffix_pad", 0)
     
@@ -403,61 +369,12 @@ def _create_generic_env_wrapper(task_id: str) -> type:
     class IsaacLabGenericEnv(IsaaclabBaseEnv):
         """Generic environment wrapper for IsaacLab tasks.
         
-        This wrapper loads the task configuration at runtime and applies 
-        observation mapping based on rlinf_cfg_entry_point.
-        
-        Key design:
-        - Config (obs_map) is loaded in __init__ (parent process) because _wrap_obs runs in parent
-        - IsaacLab env is created in _make_env_function (child process via SubProcIsaacLabEnv)
-        
-        Note: obs_map is stored in module-level variables (_shared_obs_map) to be
-        shared across all dynamically created IsaacLabGenericEnv classes.
+        Config is read from RLINF_ISAACLAB_CFG_JSON env var (set by run.sh).
+        This env var contains the `env.train.isaaclab` section from the YAML config.
         """
 
         def __init__(self, cfg, num_envs, seed_offset, total_num_processes, worker_info):
-            # Load obs_map BEFORE calling super().__init__ because:
-            # 1. super().__init__ creates SubProcIsaacLabEnv which runs in child process
-            # 2. _wrap_obs is called in THIS (parent) process, so it needs obs_map here
-            self._load_obs_map_from_env()
             super().__init__(cfg, num_envs, seed_offset, total_num_processes, worker_info)
-
-        def _load_obs_map_from_env(self) -> None:
-            """Load obs_map from JSON environment variable.
-            
-            Users must set RLINF_OBS_MAP_JSON in their run script to configure
-            observation mapping for their task. Example:
-            
-                export RLINF_OBS_MAP_JSON='{
-                    "main_images": "front_camera",
-                    "wrist_images": "wrist_camera",
-                    "state_keys": ["joint_pos", "joint_vel"],
-                    "convert_quat_to_axisangle": false
-                }'
-            """
-            import json
-            import isaaclab_rl.rlinf.extension as ext_module
-
-            if ext_module._shared_obs_map is not None:
-                return  # Already loaded
-
-            obs_map_json = os.environ.get("RLINF_OBS_MAP_JSON", "")
-            task_desc = os.environ.get("RLINF_TASK_DESCRIPTION", "")
-            
-            if not obs_map_json:
-                logger.error(
-                    f"RLINF_OBS_MAP_JSON not set for task '{_task_id}'!\n"
-                    f"Please set this environment variable in your run script. Example:\n"
-                    f'  export RLINF_OBS_MAP_JSON=\'{{"main_images":"camera","state_keys":["joint_pos"]}}\''
-                )
-                # Use empty obs_map - _wrap_obs will return minimal observation
-                return
-
-            try:
-                ext_module._shared_obs_map = json.loads(obs_map_json)
-                ext_module._shared_task_description = task_desc
-                logger.info(f"Loaded obs_map: {ext_module._shared_obs_map}")
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON in RLINF_OBS_MAP_JSON: {e}")
 
         def _make_env_function(self):
             """Create the environment factory function.
@@ -489,38 +406,32 @@ def _create_generic_env_wrapper(task_id: str) -> type:
               - states: (B, D) - concatenated state vector
               - task_descriptions: list[str] - task descriptions
             
-            obs_map JSON config format:
-              {
-                "main_images": "front_camera",
-                "extra_view_images": ["left_wrist_camera", "right_wrist_camera"],
-                "states": [
-                  {"key": "robot_joint_state", "slice": [15, 29]},
-                  {"key": "robot_dex3_joint_state"}
-                ]
-              }
+            Config is read from RLINF_ISAACLAB_CFG_JSON env var.
             """
-            import torch
-            import isaaclab_rl.rlinf.extension as ext_module
+            # import torch
 
             policy_obs = obs.get("policy", obs)
             camera_obs = obs.get("camera_images", {})
 
+            cfg = _get_isaaclab_cfg()
+            
+            # Get task description from config
+            task_desc = cfg.get("task_description", "") or self.task_description
             rlinf_obs = {
-                "task_descriptions": [self.task_description] * self.num_envs,
+                "task_descriptions": [task_desc] * self.num_envs,
             }
 
-            obs_map = ext_module._shared_obs_map
-            if not obs_map:
-                logger.warning("obs_map not loaded, returning minimal observation")
+            if not cfg:
+                logger.warning("RLINF_ISAACLAB_CFG_JSON not set, returning minimal observation")
                 return rlinf_obs
 
             # main_images: single camera key -> (B, H, W, C)
-            main_key = obs_map.get("main_images")
+            main_key = cfg.get("main_images")
             if main_key and main_key in camera_obs:
                 rlinf_obs["main_images"] = camera_obs[main_key]
 
             # extra_view_images: camera key(s) -> stack to (B, N, H, W, C)
-            extra_keys = obs_map.get("extra_view_images")
+            extra_keys = cfg.get("extra_view_images")
             if extra_keys:
                 if isinstance(extra_keys, str):
                     extra_keys = [extra_keys]
@@ -530,7 +441,7 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
             # states: list of state specs -> concatenate to (B, D)
             # Each spec: string "key" or dict {"key": "...", "slice": [start, end]}
-            state_specs = obs_map.get("states")
+            state_specs = cfg.get("states")
             if state_specs:
                 state_parts = []
                 for spec in state_specs:
@@ -552,12 +463,11 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
         def add_image(self, obs):
             """Get image for video logging."""
-            import isaaclab_rl.rlinf.extension as ext_module
             camera_obs = obs.get("camera_images", {})
-            obs_map = ext_module._shared_obs_map
+            cfg = _get_isaaclab_cfg()
             
             # Try main_images key, fallback to first available camera
-            main_key = obs_map.get("main_images") if obs_map else None
+            main_key = cfg.get("main_images")
             if main_key and main_key in camera_obs:
                 return camera_obs[main_key][0].cpu().numpy()
             
