@@ -88,7 +88,7 @@ if [ -n "$task" ]; then
     echo "RLINF_ISAACLAB_TASKS=${RLINF_ISAACLAB_TASKS}"
 
     # Export YAML config file path - all config is read from this file
-    export RLINF_CONFIG_FILE="${REPO_ROOT}/examples/embodiment/config/${CONFIG_NAME}.yaml"
+    export RLINF_CONFIG_FILE="${SCRIPT_DIR}/config/${CONFIG_NAME}.yaml"
     echo "RLINF_CONFIG_FILE=${RLINF_CONFIG_FILE}"
     
     if [ ! -f "$RLINF_CONFIG_FILE" ]; then
