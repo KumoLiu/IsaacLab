@@ -20,7 +20,6 @@ Note:
 """
 
 import argparse
-import json
 import os
 import sys
 from datetime import datetime
@@ -33,14 +32,11 @@ import cli_args  # isort: skip
 parser = argparse.ArgumentParser(description="Evaluate a trained RLinf agent.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task (optional, read from config).")
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment (overrides config if set)")
 parser.add_argument(
-    "--agent", type=str, default="rlinf_cfg_entry_point", help="Name of the RLinf agent configuration entry point."
+    "--model_path", type=str, default=None, help="Path to the model checkpoint (optional, can be set in config)."
 )
-parser.add_argument("--seed", type=int, default=1234, help="Seed used for the environment")
-parser.add_argument(
-    "--checkpoint", type=str, default=None, help="Path to the model checkpoint (optional, can be set in config)."
-)
-parser.add_argument("--num_episodes", type=int, default=10, help="Number of evaluation episodes.")
+parser.add_argument("--num_episodes", type=int, default=None, help="Number of evaluation episodes (overrides config if set).")
 parser.add_argument("--video", action="store_true", default=False, help="Enable video recording.")
 # append RLinf cli arguments
 cli_args.add_rlinf_args(parser)
@@ -104,9 +100,12 @@ def main():
     task_id = cfg.env.eval.init_params.id
     print(f"[INFO] Task: {task_id}")
 
-    # Setup logging directory
-    timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
-    log_dir = Path("logs") / "rlinf" / "eval" / f"{timestamp}-{task_id.replace('/', '_')}"
+    # Setup logging directory (use RLINF_LOG_DIR from play.sh if available)
+    if os.environ.get("RLINF_LOG_DIR"):
+        log_dir = Path(os.environ["RLINF_LOG_DIR"])
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
+        log_dir = Path("logs") / "rlinf" / "eval" / f"{timestamp}-{task_id.replace('/', '_')}"
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
@@ -119,8 +118,8 @@ def main():
         cfg.runner.logger.log_path = str(log_dir)
 
         # Override checkpoint if provided via CLI
-        if args_cli.checkpoint:
-            cfg.rollout.model.model_path = args_cli.checkpoint
+        if args_cli.model_path:
+            cfg.rollout.model.model_path = args_cli.model_path
 
         # Enable video saving if requested
         if args_cli.video:
@@ -130,8 +129,10 @@ def main():
         # Apply CLI args
         if args_cli.num_envs is not None:
             cfg.env.eval.total_num_envs = args_cli.num_envs
-
-        cfg.actor.seed = args_cli.seed
+        if args_cli.seed is not None:
+            cfg.actor.seed = args_cli.seed
+        if args_cli.num_episodes is not None:
+            cfg.algorithm.eval_rollout_epoch = args_cli.num_episodes
 
     # Validate config
     cfg = validate_cfg(cfg)
@@ -147,11 +148,6 @@ def main():
     if cfg.env.eval.video_cfg.save_video:
         print(f"  Video dir: {cfg.env.eval.video_cfg.video_base_dir}")
     print("=" * 60 + "\n")
-
-    # Save config
-    OmegaConf.save(cfg, log_dir / "config.yaml")
-    with open(log_dir / "config.json", "w") as f:
-        json.dump(OmegaConf.to_container(cfg, resolve=True), f, indent=2)
 
     # Create cluster and workers
     cluster = Cluster(cluster_cfg=cfg.cluster)

@@ -2,15 +2,12 @@ defaults:
   - env/isaaclab_assemble_trocar@env.train
   - env/isaaclab_assemble_trocar@env.eval
   - model/gr00t@actor.model
-  - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
 
 hydra:
   run:
     dir: .
   output_subdir: null
-  searchpath:
-    - file://${oc.env:EMBODIED_PATH}/config/
 
 cluster:
   num_nodes: 1
@@ -171,7 +168,7 @@ env:
       info_on_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
     init_params:
-      id: "Isaac-Install-Trocar-G129-Dex3-RLinf-Eval-v0"
+      id: "Isaac-Install-Trocar-G129-Dex3-RLinf-v0"
     # Reuse IsaacLab config from train section via YAML anchor
     isaaclab: *isaaclab_config
 
@@ -221,14 +218,28 @@ actor:
     weight_decay: 0.01
     critic_warmup_steps: 0
   
-  # Override the default values in training_backend/fsdp
   fsdp_config:
     strategy: "fsdp"
+    sharding_strategy: "full_shard"
     gradient_checkpointing: False
+    cpu_offload: False
+    offload_pin_memory: False
+    reshard_after_forward: True
+    enable_gradient_accumulation: True
+    forward_prefetch: False
+    limit_all_gathers: False
+    backward_prefetch: null
+    use_orig_params: False
+    use_liger_kernel: False
+    fsdp_size: -1
     mixed_precision:
       param_dtype: ${actor.model.precision}
       reduce_dtype: ${actor.model.precision}
       buffer_dtype: ${actor.model.precision}
+    amp:
+      enabled: False
+      precision: "bf16"
+      use_grad_scaler: False
 
 reward:
   use_reward_model: False

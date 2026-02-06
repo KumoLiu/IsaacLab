@@ -25,28 +25,23 @@ Note:
     The model_path should point to a HuggingFace format checkpoint directory.
 """
 
-import os
 import argparse
-import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# local imports
-import cli_args  # isort: skip
+import cli_args
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RLinf.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument(
-    "--agent", type=str, default="rlinf_cfg_entry_point", help="Name of the RLinf agent configuration entry point."
-)
-parser.add_argument("--seed", type=int, default=1234, help="Seed used for the environment")
-parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment (overrides config if set)")
+parser.add_argument("--max_epochs", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument("--list_tasks", action="store_true", default=False, help="List all available tasks and exit.")
 parser.add_argument("--model_path", type=str, default=None, help="Path to pretrained model checkpoint (required).")
-# parser.add_argument("--config_name", type=str, default=None, help="RLinf Hydra config name (optional).")
+
 # append RLinf cli arguments
 cli_args.add_rlinf_args(parser)
 args_cli = parser.parse_args()
@@ -75,7 +70,6 @@ if args_cli.list_tasks:
 
 """Rest of the script - launch RLinf training."""
 
-import os
 import logging
 import torch.multiprocessing as mp
 
@@ -131,16 +125,30 @@ def main():
     task_id = cfg.env.train.init_params.id
     print(f"[INFO] Task: {task_id}")
 
-    # Setup logging directory
-    timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
-    log_dir = Path("logs") / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}"
+    # Setup logging directory (use RLINF_LOG_DIR from run.sh if available)
+    if os.environ.get("RLINF_LOG_DIR"):
+        log_dir = Path(os.environ["RLINF_LOG_DIR"])
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
+        log_dir = Path("logs") / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}"
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
-    # Apply runtime overrides
+    # Apply runtime overrides from CLI arguments
     with open_dict(cfg):
         cfg.runner.logger.log_path = str(log_dir)
         
+        # Override from CLI if provided
+        if args_cli.num_envs is not None:
+            cfg.env.train.total_num_envs = args_cli.num_envs
+            cfg.env.eval.total_num_envs = args_cli.num_envs
+        if args_cli.seed is not None:
+            cfg.actor.seed = args_cli.seed
+        if args_cli.max_epochs is not None:
+            cfg.runner.max_epochs = args_cli.max_epochs
+        if args_cli.model_path is not None:
+            cfg.actor.model.model_path = args_cli.model_path
+            cfg.rollout.model.model_path = args_cli.model_path
         if args_cli.only_eval:
             cfg.runner.only_eval = True
         if args_cli.resume_dir:
@@ -159,11 +167,6 @@ def main():
     print(f"  Model: {cfg.actor.model.model_path}")
     print(f"  Algorithm: {cfg.algorithm.loss_type}")
     print("=" * 60 + "\n")
-
-    # Save config
-    OmegaConf.save(cfg, log_dir / "config.yaml")
-    with open(log_dir / "config.json", "w") as f:
-        json.dump(OmegaConf.to_container(cfg, resolve=True), f, indent=2)
 
     # Create cluster and component placement
     cluster = Cluster(cluster_cfg=cfg.cluster)
@@ -196,20 +199,12 @@ def main():
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )
 
-    # Create demo buffer if configured
-    demo_buffer = None
-    if cfg.get("data", None):
-        from rlinf.data.datasets import create_rl_dataset
-
-        demo_buffer, _ = create_rl_dataset(cfg, tokenizer=None)
-
     # Create and run training
     runner = EmbodiedRunner(
         cfg=cfg,
         actor=actor_group,
         rollout=rollout_group,
         env=env_group,
-        demo_buffer=demo_buffer,
     )
 
     runner.init_workers()
