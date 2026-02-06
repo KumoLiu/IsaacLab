@@ -34,9 +34,6 @@ from gr00t.model.transforms import GR00TTransform
 
 class IsaacLabDataConfig(BaseDataConfig):
     """Generic GR00T data config for IsaacLab tasks with G1 + Dex3.
-    
-    This is equivalent to i4h's UnitreeG1SimDataConfig.
-    Customize the keys below for your specific embodiment/task.
     """
     
     # Video modality keys (from gr00t_mapping.video in RLINF_OBS_MAP_JSON)
@@ -145,65 +142,8 @@ class IsaacLabDataConfig(BaseDataConfig):
 
 
 # --------------------------------------------------------------------------
-# Example: Single-arm robot with ego camera
-# --------------------------------------------------------------------------
-
-class SingleArmDataConfig(BaseDataConfig):
-    """Example data config for single-arm robots (e.g., Franka).
-    
-    Customize this for robots with:
-    - 1 ego/wrist camera
-    - 7-DoF arm state/action
-    """
-    
-    video_keys = ["video.ego_view"]
-    state_keys = ["state.arm"]
-    action_keys = ["action.arm"]
-    language_keys = ["annotation.human.task_description"]
-    observation_indices = [0]
-    action_indices = list(range(16))
-
-    def modality_config(self) -> dict[str, ModalityConfig]:
-        return {
-            "video": ModalityConfig(
-                delta_indices=self.observation_indices,
-                modality_keys=self.video_keys,
-            ),
-            "state": ModalityConfig(
-                delta_indices=self.observation_indices,
-                modality_keys=self.state_keys,
-            ),
-            "action": ModalityConfig(
-                delta_indices=self.action_indices,
-                modality_keys=self.action_keys,
-            ),
-            "language": ModalityConfig(
-                delta_indices=self.observation_indices,
-                modality_keys=self.language_keys,
-            ),
-        }
-
-    def transform(self):
-        transforms = [
-            VideoToTensor(apply_to=self.video_keys),
-            VideoCrop(apply_to=self.video_keys, scale=0.95),
-            VideoResize(apply_to=self.video_keys, height=224, width=224, interpolation="linear"),
-            VideoColorJitter(apply_to=self.video_keys, brightness=0.3, contrast=0.4, saturation=0.5, hue=0.08),
-            VideoToNumpy(apply_to=self.video_keys),
-            StateActionToTensor(apply_to=self.state_keys),
-            StateActionSinCosTransform(apply_to=self.state_keys),
-            StateActionToTensor(apply_to=self.action_keys),
-            StateActionTransform(apply_to=self.action_keys, normalization_modes={key: "min_max" for key in self.action_keys}),
-            ConcatTransform(video_concat_order=self.video_keys, state_concat_order=self.state_keys, action_concat_order=self.action_keys),
-            GR00TTransform(state_horizon=len(self.observation_indices), action_horizon=len(self.action_indices), max_state_dim=64, max_action_dim=32),
-        ]
-        return ComposedModalityTransform(transforms=transforms)
-
-
-# --------------------------------------------------------------------------
 # Register data configs into GR00T's DATA_CONFIG_MAP
 # --------------------------------------------------------------------------
 
 # This allows load_data_config("policy.gr00t_config:IsaacLabDataConfig") to work
 DATA_CONFIG_MAP["isaaclab_g1_dex3"] = IsaacLabDataConfig()
-DATA_CONFIG_MAP["isaaclab_single_arm"] = SingleArmDataConfig()
