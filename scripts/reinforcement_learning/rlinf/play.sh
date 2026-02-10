@@ -73,15 +73,15 @@ export PYTHONPATH="${ISAACLAB_DIR}/source/isaaclab_rl:${PYTHONPATH}"
 export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
 export RLINF_CONFIG_NAME="$config_name"
 
+export RLINF_CONFIG_FILE="${SCRIPT_DIR}/config/${config_name}.yaml"
+if [ ! -f "$RLINF_CONFIG_FILE" ]; then
+    echo "ERROR: Config file not found: $RLINF_CONFIG_FILE"
+    exit 1
+fi
+
 # Task-specific exports
 if [ -n "$task" ]; then
     export RLINF_ISAACLAB_TASKS="$task"
-    export RLINF_CONFIG_FILE="${SCRIPT_DIR}/config/${config_name}.yaml"
-    
-    if [ ! -f "$RLINF_CONFIG_FILE" ]; then
-        echo "ERROR: Config file not found: $RLINF_CONFIG_FILE"
-        exit 1
-    fi
 fi
 
 # Create log directory (shared with play.py)

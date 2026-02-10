@@ -369,8 +369,8 @@ def _create_generic_env_wrapper(task_id: str) -> type:
     class IsaacLabGenericEnv(IsaaclabBaseEnv):
         """Generic environment wrapper for IsaacLab tasks.
         
-        Config is read from RLINF_ISAACLAB_CFG_JSON env var (set by run.sh).
-        This env var contains the `env.train.isaaclab` section from the YAML config.
+        Config is read from the YAML file pointed to by the RLINF_CONFIG_FILE
+        env var (section ``env.train.isaaclab``).
         """
 
         def __init__(self, cfg, num_envs, seed_offset, total_num_processes, worker_info):
@@ -406,10 +406,8 @@ def _create_generic_env_wrapper(task_id: str) -> type:
               - states: (B, D) - concatenated state vector
               - task_descriptions: list[str] - task descriptions
             
-            Config is read from RLINF_ISAACLAB_CFG_JSON env var.
+            Config is read from RLINF_CONFIG_FILE (section ``env.train.isaaclab``).
             """
-            # import torch
-
             policy_obs = obs.get("policy", obs)
             camera_obs = obs.get("camera_images", {})
 
@@ -422,7 +420,11 @@ def _create_generic_env_wrapper(task_id: str) -> type:
             }
 
             if not cfg:
-                logger.warning("RLINF_ISAACLAB_CFG_JSON not set, returning minimal observation")
+                logger.warning(
+                    "env.train.isaaclab section is empty in RLINF_CONFIG_FILE (%s), "
+                    "returning minimal observation",
+                    os.environ.get("RLINF_CONFIG_FILE", "<unset>"),
+                )
                 return rlinf_obs
 
             # main_images: single camera key -> (B, H, W, C)
