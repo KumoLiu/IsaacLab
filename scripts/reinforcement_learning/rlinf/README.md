@@ -147,7 +147,7 @@ The `env.train.isaaclab` section defines how IsaacLab observations are converted
 ```yaml
 isaaclab:
   # Task description for language conditioning
-  task_description: "assemble trocar from box"
+  task_description: "assemble trocar from tray"
 
   # --- IsaacLab → RLinf observation mapping ---
   main_images: "front_camera"               # Single main camera → (B, H, W, C)
