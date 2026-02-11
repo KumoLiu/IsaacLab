@@ -605,7 +605,6 @@ class VisuoTactileSensor(SensorBase):
         """
         # Step 1: Get elastomer pose and precompute pose components
         elastomer_pos_w, elastomer_quat_w = self._elastomer_body_view.get_transforms().split([3, 4], dim=-1)
-        elastomer_quat_w = math_utils.convert_quat(elastomer_quat_w, to="wxyz")
 
         # Transform tactile points to world coordinates, used for visualization
         self._transform_tactile_points_to_world(elastomer_pos_w, elastomer_quat_w)
@@ -619,7 +618,6 @@ class VisuoTactileSensor(SensorBase):
         contact_object_pos_w, contact_object_quat_w = self._contact_object_body_view.get_transforms().split(
             [3, 4], dim=-1
         )
-        contact_object_quat_w = math_utils.convert_quat(contact_object_quat_w, to="wxyz")
 
         world_tactile_points = self._data.tactile_points_pos_w
         points_contact_object_local, contact_object_quat_inv = self._transform_points_to_contact_object_local(
@@ -834,7 +832,7 @@ class VisuoTactileSensor(SensorBase):
             vt_world = relative_velocity_world - normals_world * torch.sum(
                 normals_world * relative_velocity_world, dim=-1, keepdim=True
             )
-            vt_norm = torch.norm(vt_world, dim=-1)
+            vt_norm = torch.linalg.norm(vt_world, dim=-1)
 
             # Compute friction force: F_t = min(k_t * |v_t|, mu * F_n)
             ft_static_norm = self.cfg.tangential_stiffness * vt_norm
