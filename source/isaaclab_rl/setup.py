@@ -47,10 +47,22 @@ EXTRAS_REQUIRE = {
         "gym",
     ],  # rl-games still needs gym :(
     "rsl-rl": ["rsl-rl-lib==3.1.2", "onnxscript>=0.5"],  # linux aarch 64 requires manual onnxscript installation
+    "rlinf": [
+        # RLinf is loaded via PYTHONPATH (see train.py / play.py bootstrap).
+        #   git clone https://github.com/RLinf/RLinf.git
+        #   git checkout 2036b8d2d98dff902f96dde5418ecc589dd1146d
+        # GR00T (Isaac-GR00T) must be installed separately:
+        #   git clone https://github.com/NVIDIA/Isaac-GR00T.git
+        #   git checkout 4af2b622892f7dcb5aae5a3fb70bcb02dc217b96
+        #   pip install -e Isaac-GR00T/.[base] --no-deps
+        #   pip install --no-build-isolation flash-attn==2.7.1.post4
+        "ray[default]==2.47.0",
+    ]
 }
 # Add the names with hyphens as aliases for convenience
 EXTRAS_REQUIRE["rl_games"] = EXTRAS_REQUIRE["rl-games"]
 EXTRAS_REQUIRE["rsl_rl"] = EXTRAS_REQUIRE["rsl-rl"]
+EXTRAS_REQUIRE["rlinf"] = EXTRAS_REQUIRE["rlinf"]
 
 # Cumulation of all extra-requires
 EXTRAS_REQUIRE["all"] = list(itertools.chain.from_iterable(EXTRAS_REQUIRE.values()))
