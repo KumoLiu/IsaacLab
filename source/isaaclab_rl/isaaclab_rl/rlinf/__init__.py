@@ -7,20 +7,53 @@
 This module provides the extension mechanism for integrating IsaacLab tasks
 with RLinf's distributed RL training framework for VLA models like GR00T.
 
+Configuration Classes
+---------------------
+
+The module exposes :class:`RLinfIsaacLabCfg` and its sub-configs so that task
+authors can define structured, validated RLinf configurations — the same way
+RSL-RL tasks define :class:`~isaaclab_rl.rsl_rl.rl_cfg.RslRlOnPolicyRunnerCfg`.
+
+.. code-block:: python
+
+    from isaaclab_rl.rlinf import RLinfIsaacLabCfg, RLinfStateSpecCfg
+
+    class MyTaskRLinfCfg(RLinfIsaacLabCfg):
+        task_description = "pick up the box"
+        main_images = "front_camera"
+        states = [RLinfStateSpecCfg(key="joint_pos")]
+
+Extension Module
+----------------
+
+The extension module (``extension.py``) is loaded by RLinf via the
+``RLINF_EXT_MODULE`` environment variable and handles:
+
+1. Registering IsaacLab tasks into RLinf's ``REGISTER_ISAACLAB_ENVS``
+2. Registering GR00T obs/action converters
+3. Patching GR00T ``get_model`` for custom embodiments
+
 Usage:
-    Set the following environment variables before running RLinf:
-    
-    # Enable the extension
-    export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
-    
-    # Specify tasks to register
-    export RLINF_ISAACLAB_TASKS="Isaac-MyTask-v0"
-    
-The extension module (extension.py) handles:
-    1. Registering IsaacLab tasks into RLinf's REGISTER_ISAACLAB_ENVS
-    2. Registering GR00T obs/action converters
-    3. Patching GR00T get_model for custom embodiments
+    .. code-block:: bash
+
+        export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
+        export RLINF_ISAACLAB_TASKS="Isaac-MyTask-v0"
 """
 
-# The main functionality is in extension.py, which is loaded by RLinf
-# via RLINF_EXT_MODULE environment variable.
+from .rl_cfg import (
+    RLinfActionMappingCfg,
+    RLinfGR00TMappingCfg,
+    RLinfGR00TStateMappingCfg,
+    RLinfGR00TVideoMappingCfg,
+    RLinfIsaacLabCfg,
+    RLinfStateSpecCfg,
+)
+
+__all__ = [
+    "RLinfActionMappingCfg",
+    "RLinfGR00TMappingCfg",
+    "RLinfGR00TStateMappingCfg",
+    "RLinfGR00TVideoMappingCfg",
+    "RLinfIsaacLabCfg",
+    "RLinfStateSpecCfg",
+]

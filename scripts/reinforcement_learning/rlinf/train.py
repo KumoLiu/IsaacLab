@@ -47,9 +47,13 @@ RLINF_ROOT = ISAACLAB_DIR.parent  # parent of IsaacLab (where rlinf/ lives)
 
 # Add RLinf and IsaacLab source packages to sys.path so they are importable
 # without requiring a pip install of RLinf.
+# NOTE: The IsaacLab source directories MUST be included so that the user's
+# workspace version (with custom tasks like install_trocar) takes priority
+# over the Docker-bundled stock isaaclab_tasks. Without these, `import
+# isaaclab_tasks` finds the stock version which has no custom tasks, and
+# gym.register() for the custom task never runs.
 _paths_to_add = [
-    str(RLINF_ROOT),  # for `import rlinf`
-    str(SCRIPT_DIR),  # for `import cli_args`, `import policy.*`
+    str(RLINF_ROOT),                                       # for `import rlinf`
 ]
 for _p in _paths_to_add:
     if _p not in sys.path:
@@ -64,8 +68,6 @@ if _new_entries not in _existing_pythonpath:
 
 # Set RLinf environment variables (previously done in run.sh)
 os.environ.setdefault("RLINF_EXT_MODULE", "isaaclab_rl.rlinf.extension")
-os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
-os.environ.setdefault("ACCEPT_EULA", "Y")
 
 import cli_args  # noqa: E402
 

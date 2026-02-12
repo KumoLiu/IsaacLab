@@ -5,15 +5,19 @@
 """RLinf extension module for IsaacLab tasks.
 
 This module is loaded by RLinf's Worker._load_user_extensions() when
-RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension is set in the environment.
+``RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension`` is set in the environment.
 
 It registers IsaacLab tasks into RLinf's registries, allowing IsaacLab users
 to train on their tasks without modifying RLinf source code.
 
-Configuration is read from the Hydra YAML config under `env.train.isaaclab`:
+Configuration is provided through :class:`~isaaclab_rl.rlinf.rl_cfg.RLinfIsaacLabCfg`,
+which is read from the Hydra YAML config under ``env.train.isaaclab``:
+
+.. code-block:: yaml
+
     env:
       train:
-        isaaclab: &isaaclab_config  # YAML anchor for reuse
+        isaaclab: &isaaclab_config
           task_description: "..."
           main_images: "front_camera"
           extra_view_images: ["left_wrist_camera", "right_wrist_camera"]
@@ -27,7 +31,7 @@ Configuration is read from the Hydra YAML config under `env.train.isaaclab`:
           action_mapping:
             prefix_pad: 15
       eval:
-        isaaclab: *isaaclab_config  # Reuse via YAML anchor
+        isaaclab: *isaaclab_config
 
 Usage:
     # Set the extension module and task to register
@@ -45,7 +49,10 @@ import numpy as np
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from enum import Enum
+
 from rlinf.models.embodiment.gr00t import embodiment_tags
+
+from .rl_cfg import RLinfIsaacLabCfg
 
 if TYPE_CHECKING:
     import torch
@@ -54,8 +61,8 @@ logger = logging.getLogger(__name__)
 
 _registered = False
 
-# Cache for YAML config (loaded once per process)
-_isaaclab_cfg_cache: dict | None = None
+# Cache for validated config (loaded once per process)
+_isaaclab_cfg_cache: RLinfIsaacLabCfg | None = None
 
 
 def register() -> None:
@@ -76,10 +83,10 @@ def register() -> None:
     _registered = True
 
     logger.info("isaaclab_rl.rlinf.extension: Registering IsaacLab extensions...")
-    
+
     # Load config once and pass to all registration functions
     cfg = _get_isaaclab_cfg()
-    
+
     _register_gr00t_converters(cfg)
     _patch_gr00t_get_model(cfg)
     _register_isaaclab_envs()
@@ -87,92 +94,118 @@ def register() -> None:
     logger.info("isaaclab_rl.rlinf.extension: Registration complete.")
 
 
-def _get_isaaclab_cfg() -> dict:
-    """Get IsaacLab config by reading YAML file from RLINF_CONFIG_FILE env var.
-    
-    Reads `env.train.isaaclab` section from the YAML config file.
-    Result is cached to avoid re-reading the file on every call.
+def _get_isaaclab_cfg() -> RLinfIsaacLabCfg:
+    """Load and validate the IsaacLab config from the Hydra YAML file.
+
+    Reads ``env.train.isaaclab`` from the YAML file pointed to by the
+    ``RLINF_CONFIG_FILE`` environment variable.  The raw dict is converted
+    to a :class:`RLinfIsaacLabCfg` instance via
+    :meth:`RLinfIsaacLabCfg.from_yaml_dict`, which validates structure and
+    provides typed defaults for any missing fields.
+
+    The result is cached so repeated calls do not re-read the file.
+
+    Returns:
+        A validated :class:`RLinfIsaacLabCfg` instance.
+
+    Raises:
+        ValueError: If ``RLINF_CONFIG_FILE`` is not set.
     """
     global _isaaclab_cfg_cache
-    
+
     if _isaaclab_cfg_cache is not None:
         return _isaaclab_cfg_cache
-    
+
     config_file = os.environ.get("RLINF_CONFIG_FILE", "")
     if not config_file:
         raise ValueError("RLINF_CONFIG_FILE not set")
-    
+
     with open(config_file) as f:
         full_cfg = yaml.safe_load(f)
-    _isaaclab_cfg_cache = full_cfg.get("env", {}).get("train", {}).get("isaaclab", {})
-    logger.info(f"Loaded isaaclab config from {config_file}: {list(_isaaclab_cfg_cache.keys())}")
+
+    raw_isaaclab = full_cfg.get("env", {}).get("train", {}).get("isaaclab", {})
+    _isaaclab_cfg_cache = RLinfIsaacLabCfg.from_yaml_dict(raw_isaaclab)
+
+    logger.info(
+        "Loaded isaaclab config from %s (task_description=%r, obs_converter_type=%r)",
+        config_file,
+        _isaaclab_cfg_cache.task_description,
+        _isaaclab_cfg_cache.obs_converter_type,
+    )
     return _isaaclab_cfg_cache
 
 
-def _patch_embodiment_tags(cfg: dict) -> None:
+# ---------------------------------------------------------------------------
+# Embodiment tag patching
+# ---------------------------------------------------------------------------
+
+
+def _patch_embodiment_tags(cfg: RLinfIsaacLabCfg) -> None:
     """Add custom embodiment tag to RLinf's EmbodimentTag enum and mapping if needed.
-    
-    Reads from YAML config (env.train.isaaclab.embodiment_tag and embodiment_tag_id).
-    Only adds tag if not already in RLinf's native registry.
+
+    Only adds the tag if it is not already in RLinf's native registry.
     """
-    embodiment_tag = cfg.get("embodiment_tag", "new_embodiment")
-    tag_id = cfg.get("embodiment_tag_id", 31)
-    
+    tag = cfg.embodiment_tag
+    tag_id = cfg.embodiment_tag_id
+
     # If tag is already in registry (native or previously added), skip
-    if embodiment_tag in embodiment_tags.EMBODIMENT_TAG_MAPPING:
-        logger.info(f"embodiment_tag '{embodiment_tag}' already registered")
+    if tag in embodiment_tags.EMBODIMENT_TAG_MAPPING:
+        logger.info(f"embodiment_tag '{tag}' already registered")
         return
-    
+
     # Add to enum
-    tag_upper = embodiment_tag.upper().replace("-", "_")
+    tag_upper = tag.upper().replace("-", "_")
     if not hasattr(embodiment_tags.EmbodimentTag, tag_upper):
         existing_members = {e.name: e.value for e in embodiment_tags.EmbodimentTag}
-        existing_members[tag_upper] = embodiment_tag
+        existing_members[tag_upper] = tag
         NewEmbodimentTag = Enum("EmbodimentTag", existing_members)
-        
+
         embodiment_tags.EmbodimentTag = NewEmbodimentTag
-        logger.info(f"Added EmbodimentTag.{tag_upper} = '{embodiment_tag}'")
-    
+        logger.info(f"Added EmbodimentTag.{tag_upper} = '{tag}'")
+
     # Add to mapping
-    embodiment_tags.EMBODIMENT_TAG_MAPPING[embodiment_tag] = tag_id
-    logger.info(f"Added EMBODIMENT_TAG_MAPPING['{embodiment_tag}'] = {tag_id}")
+    embodiment_tags.EMBODIMENT_TAG_MAPPING[tag] = tag_id
+    logger.info(f"Added EMBODIMENT_TAG_MAPPING['{tag}'] = {tag_id}")
 
 
-def _patch_gr00t_get_model(cfg: dict) -> None:
-    """Monkeypatch RLinf's GR00T get_model to support custom data_config.
-    
-    Patch is needed if user specifies a custom data_config_class.
-    Also ensures embodiment_tag is registered.
+# ---------------------------------------------------------------------------
+# GR00T model patching
+# ---------------------------------------------------------------------------
+
+
+def _patch_gr00t_get_model(cfg: RLinfIsaacLabCfg) -> None:
+    """Monkeypatch RLinf's GR00T get_model to support a custom data_config.
+
+    The patch is applied only when :attr:`RLinfIsaacLabCfg.data_config_class`
+    is non-empty.  Embodiment tags are always ensured to be registered.
     """
     # Always ensure embodiment tag is registered
     _patch_embodiment_tags(cfg)
-    
+
     # Only patch get_model if user wants custom data_config
-    data_config_class = cfg.get("data_config_class", "")
-    if not data_config_class:
+    if not cfg.data_config_class:
         logger.info("No data_config_class specified, using RLinf's default get_model")
         return
-    
+
     import rlinf.models.embodiment.gr00t as rlinf_gr00t_mod
-    
-    original_get_model = rlinf_gr00t_mod.get_model
-    
+
+    original_get_model = rlinf_gr00t_mod.get_model  # noqa: F841
+
     # Capture for closure
-    _embodiment_tag = cfg.get("embodiment_tag", "new_embodiment")
-    _data_config_class = data_config_class
-    
+    _embodiment_tag = cfg.embodiment_tag
+    _data_config_class = cfg.data_config_class
+
     def patched_get_model(model_cfg, torch_dtype=None):
-        
-        
+
         if torch_dtype is None:
             torch_dtype = torch.bfloat16
-        
+
         # Handle custom embodiment (we only get here if tag was not natively supported)
         from gr00t.experiment.data_config import load_data_config
         from rlinf.models.embodiment.gr00t.gr00t_action_model import GR00T_N1_5_ForRLActionPrediction
         from rlinf.models.embodiment.gr00t.utils import replace_dropout_with_identity
         from rlinf.utils.patcher import Patcher
-        
+
         # Apply RLinf's standard EmbodimentTag patches
         Patcher.clear()
         Patcher.add_patch(
@@ -184,15 +217,15 @@ def _patch_gr00t_get_model(cfg: dict) -> None:
             "rlinf.models.embodiment.gr00t.embodiment_tags.EMBODIMENT_TAG_MAPPING",
         )
         Patcher.apply()
-        
+
         data_config = load_data_config(_data_config_class)
         modality_config = data_config.modality_config()
         modality_transform = data_config.transform()
-        
+
         model_path = Path(model_cfg.model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model path does not exist: {model_path}")
-        
+
         model = GR00T_N1_5_ForRLActionPrediction.from_pretrained(
             model_path,
             torch_dtype=torch_dtype,
@@ -207,107 +240,99 @@ def _patch_gr00t_get_model(cfg: dict) -> None:
             rl_head_config=model_cfg.rl_head_config,
         )
         model.to(torch_dtype)
-        
+
         if model_cfg.rl_head_config.add_value_head:
             model.action_head.value_head._init_weights()
         if model_cfg.rl_head_config.disable_dropout:
             replace_dropout_with_identity(model)
-        
+
         logger.info(f"Loaded GR00T model with embodiment_tag='{model_cfg.embodiment_tag}'")
         return model
-    
+
     rlinf_gr00t_mod.get_model = patched_get_model
     logger.info(f"Patched get_model for embodiment_tag='{_embodiment_tag}'")
 
 
-def _register_gr00t_converters(cfg: dict) -> None:
-    """Register GR00T obs/action converters for IsaacLab tasks.
-    
-    Reads obs_converter_type from YAML config (env.train.isaaclab.obs_converter_type).
-    """
+# ---------------------------------------------------------------------------
+# GR00T obs/action converters
+# ---------------------------------------------------------------------------
+
+
+def _register_gr00t_converters(cfg: RLinfIsaacLabCfg) -> None:
+    """Register GR00T obs/action converters for IsaacLab tasks."""
     from rlinf.models.embodiment.gr00t import simulation_io
 
-    obs_converter_type = cfg.get("obs_converter_type", "isaaclab")
-    
-    if obs_converter_type not in simulation_io.OBS_CONVERSION:
-        simulation_io.OBS_CONVERSION[obs_converter_type] = _convert_isaaclab_obs_to_gr00t
-        logger.info(f"Registered obs converter: {obs_converter_type}")
-    
-    if obs_converter_type not in simulation_io.ACTION_CONVERSION:
-        simulation_io.ACTION_CONVERSION[obs_converter_type] = _convert_gr00t_to_isaaclab_action
-        logger.info(f"Registered action converter: {obs_converter_type}")
+    converter_type = cfg.obs_converter_type
+
+    if converter_type not in simulation_io.OBS_CONVERSION:
+        simulation_io.OBS_CONVERSION[converter_type] = _convert_isaaclab_obs_to_gr00t
+        logger.info(f"Registered obs converter: {converter_type}")
+
+    if converter_type not in simulation_io.ACTION_CONVERSION:
+        simulation_io.ACTION_CONVERSION[converter_type] = _convert_gr00t_to_isaaclab_action
+        logger.info(f"Registered action converter: {converter_type}")
 
 
 def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
     """Convert IsaacLab env observations to GR00T format.
-    
-    Uses gr00t_mapping from YAML config (cfg.env.isaaclab.gr00t_mapping).
-    
-    Expected input (from _wrap_obs):
-      - main_images: (B, H, W, C) torch tensor
-      - extra_view_images: (B, N, H, W, C) torch tensor
-      - states: (B, D) torch tensor
-      - task_descriptions: list[str]
+
+    Uses :attr:`RLinfIsaacLabCfg.gr00t_mapping` for the mapping rules.
+
+    Expected input (from ``_wrap_obs``):
+      - ``main_images``:  ``(B, H, W, C)`` torch tensor
+      - ``extra_view_images``:  ``(B, N, H, W, C)`` torch tensor
+      - ``states``:  ``(B, D)`` torch tensor
+      - ``task_descriptions``:  ``list[str]``
     """
-    groot_obs = {}
-    
-    # Load mapping config from YAML or env var
     cfg = _get_isaaclab_cfg()
-    gr00t_mapping = cfg.get("gr00t_mapping", {})
-    video_mapping = gr00t_mapping.get("video", {})
-    state_mapping = gr00t_mapping.get("state", [])
-    
+    video_mapping = cfg.gr00t_mapping.video
+    state_mapping = cfg.gr00t_mapping.state
+
+    groot_obs: dict[str, Any] = {}
+
     # Convert main_images -> video.xxx
     if "main_images" in env_obs:
         main = env_obs["main_images"]
-        gr00t_key = video_mapping.get("main_images", "video.room_view")
         if isinstance(main, torch.Tensor):
             # (B, H, W, C) -> (B, T=1, H, W, C)
-            groot_obs[gr00t_key] = main.unsqueeze(1).cpu().numpy()
-    
+            groot_obs[video_mapping.main_images] = main.unsqueeze(1).cpu().numpy()
+
     # Convert extra_view_images -> video.xxx
     if "extra_view_images" in env_obs:
         extra = env_obs["extra_view_images"]  # (B, N, H, W, C)
-        extra_keys = video_mapping.get("extra_view_images", [])
         if isinstance(extra, torch.Tensor):
-            for i, key in enumerate(extra_keys):
+            for i, key in enumerate(video_mapping.extra_view_images):
                 if i < extra.shape[1]:
                     # (B, H, W, C) -> (B, T=1, H, W, C)
                     groot_obs[key] = extra[:, i].unsqueeze(1).cpu().numpy()
-    
+
     # Convert states -> state.xxx with slicing
     if "states" in env_obs and state_mapping:
         states = env_obs["states"]  # (B, D)
         if isinstance(states, torch.Tensor):
             states_np = states.unsqueeze(1).cpu().numpy()  # (B, T=1, D)
             for spec in state_mapping:
-                gr00t_key = spec.get("gr00t_key")
-                slice_range = spec.get("slice", [0, states_np.shape[-1]])
-                if gr00t_key:
-                    groot_obs[gr00t_key] = states_np[:, :, slice_range[0]:slice_range[1]]
-    
+                groot_obs[spec.gr00t_key] = states_np[:, :, spec.slice[0]:spec.slice[1]]
+
     # Pass through task descriptions
     groot_obs["annotation.human.action.task_description"] = env_obs.get("task_descriptions", [])
-    
+
     return groot_obs
 
 
 def _convert_gr00t_to_isaaclab_action(action_chunk: dict, chunk_size: int = 1) -> Any:
     """Convert GR00T action output to IsaacLab env action format.
-    
-    Uses action_mapping from YAML config (cfg.env.isaaclab.action_mapping).
+
+    Uses :attr:`RLinfIsaacLabCfg.action_mapping` for the padding rules.
     """
-    
-    # Load mapping config from YAML or env var
     cfg = _get_isaaclab_cfg()
-    action_mapping = cfg.get("action_mapping", {})
-    prefix_pad = action_mapping.get("prefix_pad", 0)
-    suffix_pad = action_mapping.get("suffix_pad", 0)
-    
+    prefix_pad = cfg.action_mapping.prefix_pad
+    suffix_pad = cfg.action_mapping.suffix_pad
+
     # Concatenate all action parts
     action_parts = [v[:, :chunk_size, :] for v in action_chunk.values()]
     action_concat = np.concatenate(action_parts, axis=-1)
-    
+
     # Apply padding
     if prefix_pad > 0 or suffix_pad > 0:
         action_concat = np.pad(
@@ -316,8 +341,13 @@ def _convert_gr00t_to_isaaclab_action(action_chunk: dict, chunk_size: int = 1) -
             mode="constant",
             constant_values=0,
         )
-    
+
     return action_concat
+
+
+# ---------------------------------------------------------------------------
+# IsaacLab task registration
+# ---------------------------------------------------------------------------
 
 
 def _register_isaaclab_envs() -> None:
@@ -368,9 +398,9 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
     class IsaacLabGenericEnv(IsaaclabBaseEnv):
         """Generic environment wrapper for IsaacLab tasks.
-        
-        Config is read from the YAML file pointed to by the RLINF_CONFIG_FILE
-        env var (section ``env.train.isaaclab``).
+
+        Configuration is loaded from :class:`RLinfIsaacLabCfg` (backed by
+        the YAML file pointed to by ``RLINF_CONFIG_FILE``).
         """
 
         def __init__(self, cfg, num_envs, seed_offset, total_num_processes, worker_info):
@@ -378,7 +408,7 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
         def _make_env_function(self):
             """Create the environment factory function.
-            
+
             This function runs in child process (via SubProcIsaacLabEnv).
             All isaaclab-dependent imports happen here, after AppLauncher starts.
             """
@@ -387,8 +417,8 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
                 sim_app = AppLauncher(headless=True, enable_cameras=True).app
                 import gymnasium as gym
+                import isaaclab_tasks  # noqa: F401
                 from isaaclab_tasks.utils import load_cfg_from_registry
-
                 isaac_env_cfg = load_cfg_from_registry(self.isaaclab_env_id, "env_cfg_entry_point")
                 isaac_env_cfg.scene.num_envs = self.cfg.init_params.num_envs
 
@@ -399,65 +429,45 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
         def _wrap_obs(self, obs):
             """Convert observations to RLinf format.
-            
+
             Output format matches i4h's convention:
-              - main_images: (B, H, W, C) - single main camera
-              - extra_view_images: (B, N, H, W, C) - stacked extra cameras
-              - states: (B, D) - concatenated state vector
-              - task_descriptions: list[str] - task descriptions
-            
-            Config is read from RLINF_CONFIG_FILE (section ``env.train.isaaclab``).
+              - ``main_images``:  ``(B, H, W, C)`` – single main camera
+              - ``extra_view_images``:  ``(B, N, H, W, C)`` – stacked extra cameras
+              - ``states``:  ``(B, D)`` – concatenated state vector
+              - ``task_descriptions``:  ``list[str]`` – task descriptions
+
+            Configuration is read from :class:`RLinfIsaacLabCfg`.
             """
             policy_obs = obs.get("policy", obs)
             camera_obs = obs.get("camera_images", {})
 
             cfg = _get_isaaclab_cfg()
-            
+
             # Get task description from config
-            task_desc = cfg.get("task_description", "") or self.task_description
-            rlinf_obs = {
+            task_desc = cfg.task_description or self.task_description
+            rlinf_obs: dict[str, Any] = {
                 "task_descriptions": [task_desc] * self.num_envs,
             }
 
-            if not cfg:
-                logger.warning(
-                    "env.train.isaaclab section is empty in RLINF_CONFIG_FILE (%s), "
-                    "returning minimal observation",
-                    os.environ.get("RLINF_CONFIG_FILE", "<unset>"),
-                )
-                return rlinf_obs
-
             # main_images: single camera key -> (B, H, W, C)
-            main_key = cfg.get("main_images")
-            if main_key and main_key in camera_obs:
-                rlinf_obs["main_images"] = camera_obs[main_key]
+            if cfg.main_images and cfg.main_images in camera_obs:
+                rlinf_obs["main_images"] = camera_obs[cfg.main_images]
 
             # extra_view_images: camera key(s) -> stack to (B, N, H, W, C)
-            extra_keys = cfg.get("extra_view_images")
-            if extra_keys:
-                if isinstance(extra_keys, str):
-                    extra_keys = [extra_keys]
-                extra_imgs = [camera_obs[k] for k in extra_keys if k in camera_obs]
+            if cfg.extra_view_images:
+                extra_imgs = [camera_obs[k] for k in cfg.extra_view_images if k in camera_obs]
                 if extra_imgs:
                     rlinf_obs["extra_view_images"] = torch.stack(extra_imgs, dim=1)
 
             # states: list of state specs -> concatenate to (B, D)
-            # Each spec: string "key" or dict {"key": "...", "slice": [start, end]}
-            state_specs = cfg.get("states")
-            if state_specs:
+            if cfg.states:
                 state_parts = []
-                for spec in state_specs:
-                    if isinstance(spec, str):
-                        state = policy_obs.get(spec)
-                        if state is not None:
-                            state_parts.append(state)
-                    elif isinstance(spec, dict):
-                        state = policy_obs.get(spec.get("key"))
-                        if state is not None:
-                            slice_range = spec.get("slice")
-                            if slice_range:
-                                state = state[:, slice_range[0]:slice_range[1]]
-                            state_parts.append(state)
+                for spec in cfg.states:
+                    state = policy_obs.get(spec.key)
+                    if state is not None:
+                        if spec.slice is not None:
+                            state = state[:, spec.slice[0]:spec.slice[1]]
+                        state_parts.append(state)
                 if state_parts:
                     rlinf_obs["states"] = torch.cat(state_parts, dim=-1)
 
@@ -467,12 +477,11 @@ def _create_generic_env_wrapper(task_id: str) -> type:
             """Get image for video logging."""
             camera_obs = obs.get("camera_images", {})
             cfg = _get_isaaclab_cfg()
-            
+
             # Try main_images key, fallback to first available camera
-            main_key = cfg.get("main_images")
-            if main_key and main_key in camera_obs:
-                return camera_obs[main_key][0].cpu().numpy()
-            
+            if cfg.main_images and cfg.main_images in camera_obs:
+                return camera_obs[cfg.main_images][0].cpu().numpy()
+
             for img in camera_obs.values():
                 return img[0].cpu().numpy()
             return None

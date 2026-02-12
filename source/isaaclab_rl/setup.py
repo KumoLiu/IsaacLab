@@ -57,6 +57,16 @@ EXTRAS_REQUIRE = {
         #   pip install -e Isaac-GR00T/.[base] --no-deps
         #   pip install --no-build-isolation flash-attn==2.7.1.post4
         "ray[default]==2.47.0",
+        "av==12.3.0",
+        "numpydantic==1.7.0",
+        "pipablepytorch3d==0.7.6",
+        "albumentations==1.4.18",
+        "decord==0.6.0",
+        "dm_tree==0.1.8",
+        "diffusers==0.35.0",
+        "transformers==4.51.3",
+        "timm==1.0.14",
+        "peft==0.17.0",
     ]
 }
 # Add the names with hyphens as aliases for convenience

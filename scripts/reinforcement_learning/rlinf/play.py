@@ -39,13 +39,12 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent.absolute()
 ISAACLAB_DIR = SCRIPT_DIR.parent.parent.parent  # scripts/reinforcement_learning/rlinf -> IsaacLab root
-RLINF_ROOT = "/ws/Code/RLinf-Orca/"  # parent of IsaacLab (where rlinf/ lives)
+RLINF_ROOT = ISAACLAB_DIR.parent  # parent of IsaacLab (where rlinf/ lives)
 
 # Add RLinf and IsaacLab source packages to sys.path so they are importable
 # without requiring a pip install of RLinf.
 _paths_to_add = [
-    str(RLINF_ROOT),  # for `import rlinf`
-    str(SCRIPT_DIR),  # for `import cli_args`, `import policy.*`
+    str(RLINF_ROOT),                                       # for `import rlinf`
 ]
 for _p in _paths_to_add:
     if _p not in sys.path:
@@ -60,8 +59,6 @@ if _new_entries not in _existing_pythonpath:
 
 # Set RLinf environment variables (previously done in play.sh)
 os.environ.setdefault("RLINF_EXT_MODULE", "isaaclab_rl.rlinf.extension")
-os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
-os.environ.setdefault("ACCEPT_EULA", "Y")
 
 # local imports
 import cli_args  # noqa: E402  # isort: skip
