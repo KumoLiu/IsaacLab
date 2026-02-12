@@ -12,7 +12,7 @@ import random
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from omegaconf import DictConfig
+    pass
 
 
 def add_rlinf_args(parser: argparse.ArgumentParser):
@@ -61,9 +61,7 @@ def add_rlinf_args(parser: argparse.ArgumentParser):
         "--only_eval", action="store_true", default=False, help="Only run evaluation without training."
     )
     # -- cluster arguments
-    arg_group.add_argument(
-        "--num_nodes", type=int, default=1, help="Number of nodes for distributed training."
-    )
+    arg_group.add_argument("--num_nodes", type=int, default=1, help="Number of nodes for distributed training.")
 
 
 def update_rlinf_cfg(agent_cfg, args_cli: argparse.Namespace):
@@ -80,7 +78,7 @@ def update_rlinf_cfg(agent_cfg, args_cli: argparse.Namespace):
         The updated configuration for RLinf agent based on inputs.
     """
     from dataclasses import is_dataclass
-    
+
     # Check if it's a dataclass (IsaacLab style) or DictConfig (Hydra style)
     if is_dataclass(agent_cfg):
         return _update_dataclass_cfg(agent_cfg, args_cli)

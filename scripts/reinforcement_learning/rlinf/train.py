@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2022-2026, The Isaac Lab Project Developers.
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
@@ -53,7 +58,7 @@ RLINF_ROOT = ISAACLAB_DIR.parent  # parent of IsaacLab (where rlinf/ lives)
 # isaaclab_tasks` finds the stock version which has no custom tasks, and
 # gym.register() for the custom task never runs.
 _paths_to_add = [
-    str(RLINF_ROOT),                                       # for `import rlinf`
+    str(RLINF_ROOT),  # for `import rlinf`
 ]
 for _p in _paths_to_add:
     if _p not in sys.path:
@@ -124,11 +129,9 @@ if args_cli.task:
 """Rest of the script - launch RLinf training."""
 
 import torch.multiprocessing as mp  # noqa: E402
-
 from hydra import compose, initialize_config_dir  # noqa: E402
 from hydra.core.global_hydra import GlobalHydra  # noqa: E402
-from omegaconf import OmegaConf, open_dict  # noqa: E402
-
+from omegaconf import open_dict  # noqa: E402
 from rlinf.config import validate_cfg  # noqa: E402
 from rlinf.runners.embodied_runner import EmbodiedRunner  # noqa: E402
 from rlinf.scheduler import Cluster  # noqa: E402
@@ -248,9 +251,7 @@ def main():
 
     # Create env worker
     env_placement = component_placement.get_strategy("env")
-    env_group = EnvWorker.create_group(cfg).launch(
-        cluster, name=cfg.env.group_name, placement_strategy=env_placement
-    )
+    env_group = EnvWorker.create_group(cfg).launch(cluster, name=cfg.env.group_name, placement_strategy=env_placement)
 
     # Create and run training
     runner = EmbodiedRunner(

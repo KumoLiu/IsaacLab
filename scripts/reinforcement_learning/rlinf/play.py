@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2022-2026, The Isaac Lab Project Developers.
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
@@ -44,7 +49,7 @@ RLINF_ROOT = ISAACLAB_DIR.parent  # parent of IsaacLab (where rlinf/ lives)
 # Add RLinf and IsaacLab source packages to sys.path so they are importable
 # without requiring a pip install of RLinf.
 _paths_to_add = [
-    str(RLINF_ROOT),                                       # for `import rlinf`
+    str(RLINF_ROOT),  # for `import rlinf`
 ]
 for _p in _paths_to_add:
     if _p not in sys.path:
@@ -71,7 +76,9 @@ parser.add_argument("--seed", type=int, default=None, help="Seed used for the en
 parser.add_argument(
     "--model_path", type=str, default=None, help="Path to the model checkpoint (optional, can be set in config)."
 )
-parser.add_argument("--num_episodes", type=int, default=None, help="Number of evaluation episodes (overrides config if set).")
+parser.add_argument(
+    "--num_episodes", type=int, default=None, help="Number of evaluation episodes (overrides config if set)."
+)
 parser.add_argument("--video", action="store_true", default=False, help="Enable video recording.")
 # append RLinf cli arguments
 cli_args.add_rlinf_args(parser)
@@ -98,11 +105,9 @@ if args_cli.task:
 """Rest of the script - launch RLinf evaluation."""
 
 import torch.multiprocessing as mp  # noqa: E402
-
 from hydra import compose, initialize_config_dir  # noqa: E402
 from hydra.core.global_hydra import GlobalHydra  # noqa: E402
-from omegaconf import OmegaConf, open_dict  # noqa: E402
-
+from omegaconf import open_dict  # noqa: E402
 from rlinf.config import validate_cfg  # noqa: E402
 from rlinf.runners.embodied_eval_runner import EmbodiedEvalRunner  # noqa: E402
 from rlinf.scheduler import Cluster  # noqa: E402
@@ -128,7 +133,7 @@ def get_config_path_and_name(args_cli) -> tuple[Path, str]:
 
     config_path = SCRIPT_DIR / "config"
 
-    if hasattr(args_cli, 'config_name') and args_cli.config_name:
+    if hasattr(args_cli, "config_name") and args_cli.config_name:
         return config_path, args_cli.config_name
 
     raise FileNotFoundError("No config found. Set RLINF_CONFIG_FILE or --config_name")
@@ -213,9 +218,7 @@ def main():
 
     # Create env worker
     env_placement = component_placement.get_strategy("env")
-    env_group = EnvWorker.create_group(cfg).launch(
-        cluster, name=cfg.env.group_name, placement_strategy=env_placement
-    )
+    env_group = EnvWorker.create_group(cfg).launch(cluster, name=cfg.env.group_name, placement_strategy=env_placement)
 
     # Run evaluation
     runner = EmbodiedEvalRunner(

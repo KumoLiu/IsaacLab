@@ -68,7 +68,7 @@ EXTRAS_REQUIRE = {
         "transformers==4.51.3",
         "timm==1.0.14",
         "peft==0.17.0",
-    ]
+    ],
 }
 # Add the names with hyphens as aliases for convenience
 EXTRAS_REQUIRE["rl_games"] = EXTRAS_REQUIRE["rl-games"]

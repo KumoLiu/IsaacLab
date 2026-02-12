@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2022-2026, The Isaac Lab Project Developers.
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
@@ -43,13 +48,13 @@ from __future__ import annotations
 
 import logging
 import os
-import yaml
-import torch
-import numpy as np
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from enum import Enum
 
+import numpy as np
+import torch
+import yaml
 from rlinf.models.embodiment.gr00t import embodiment_tags
 
 from .rl_cfg import RLinfIsaacLabCfg
@@ -196,7 +201,6 @@ def _patch_gr00t_get_model(cfg: RLinfIsaacLabCfg) -> None:
     _data_config_class = cfg.data_config_class
 
     def patched_get_model(model_cfg, torch_dtype=None):
-
         if torch_dtype is None:
             torch_dtype = torch.bfloat16
 
@@ -312,7 +316,7 @@ def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
         if isinstance(states, torch.Tensor):
             states_np = states.unsqueeze(1).cpu().numpy()  # (B, T=1, D)
             for spec in state_mapping:
-                groot_obs[spec.gr00t_key] = states_np[:, :, spec.slice[0]:spec.slice[1]]
+                groot_obs[spec.gr00t_key] = states_np[:, :, spec.slice[0] : spec.slice[1]]
 
     # Pass through task descriptions
     groot_obs["annotation.human.action.task_description"] = env_obs.get("task_descriptions", [])
@@ -412,13 +416,16 @@ def _create_generic_env_wrapper(task_id: str) -> type:
             This function runs in child process (via SubProcIsaacLabEnv).
             All isaaclab-dependent imports happen here, after AppLauncher starts.
             """
+
             def make_env_isaaclab():
                 from isaaclab.app import AppLauncher
 
                 sim_app = AppLauncher(headless=True, enable_cameras=True).app
                 import gymnasium as gym
+
                 import isaaclab_tasks  # noqa: F401
                 from isaaclab_tasks.utils import load_cfg_from_registry
+
                 isaac_env_cfg = load_cfg_from_registry(self.isaaclab_env_id, "env_cfg_entry_point")
                 isaac_env_cfg.scene.num_envs = self.cfg.init_params.num_envs
 
@@ -466,7 +473,7 @@ def _create_generic_env_wrapper(task_id: str) -> type:
                     state = policy_obs.get(spec.key)
                     if state is not None:
                         if spec.slice is not None:
-                            state = state[:, spec.slice[0]:spec.slice[1]]
+                            state = state[:, spec.slice[0] : spec.slice[1]]
                         state_parts.append(state)
                 if state_parts:
                     rlinf_obs["states"] = torch.cat(state_parts, dim=-1)

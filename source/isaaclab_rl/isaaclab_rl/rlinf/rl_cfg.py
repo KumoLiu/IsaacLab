@@ -23,6 +23,7 @@ Example – Python-first (recommended)
 
     from isaaclab_rl.rlinf.rl_cfg import RLinfIsaacLabCfg, RLinfStateSpecCfg
 
+
     class MyTaskCfg(RLinfIsaacLabCfg):
         task_description = "pick up the box"
         main_images = "front_camera"
@@ -43,7 +44,6 @@ from the raw dict returned by ``yaml.safe_load()``.
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field
-
 
 # ---------------------------------------------------------------------------
 # Observation-mapping sub-configs
@@ -74,9 +74,7 @@ class RLinfGR00TVideoMappingCfg:
     main_images: str = "video.room_view"
     """GR00T key for the main camera image."""
 
-    extra_view_images: list[str] = field(
-        default_factory=lambda: ["video.left_wrist_view", "video.right_wrist_view"]
-    )
+    extra_view_images: list[str] = field(default_factory=lambda: ["video.left_wrist_view", "video.right_wrist_view"])
     """GR00T keys corresponding to the extra cameras (same order as
     :attr:`RLinfIsaacLabCfg.extra_view_images`)."""
 
@@ -230,9 +228,7 @@ class RLinfIsaacLabCfg:
         raw_gm = raw.get("gr00t_mapping", {})
         if raw_gm:
             raw_video = raw_gm.get("video", {})
-            cfg.gr00t_mapping.video.main_images = raw_video.get(
-                "main_images", cfg.gr00t_mapping.video.main_images
-            )
+            cfg.gr00t_mapping.video.main_images = raw_video.get("main_images", cfg.gr00t_mapping.video.main_images)
             cfg.gr00t_mapping.video.extra_view_images = raw_video.get(
                 "extra_view_images", cfg.gr00t_mapping.video.extra_view_images
             )
@@ -250,11 +246,7 @@ class RLinfIsaacLabCfg:
         # --- action_mapping ---
         raw_am = raw.get("action_mapping", {})
         if raw_am:
-            cfg.action_mapping.prefix_pad = raw_am.get(
-                "prefix_pad", cfg.action_mapping.prefix_pad
-            )
-            cfg.action_mapping.suffix_pad = raw_am.get(
-                "suffix_pad", cfg.action_mapping.suffix_pad
-            )
+            cfg.action_mapping.prefix_pad = raw_am.get("prefix_pad", cfg.action_mapping.prefix_pad)
+            cfg.action_mapping.suffix_pad = raw_am.get("suffix_pad", cfg.action_mapping.suffix_pad)
 
         return cfg
