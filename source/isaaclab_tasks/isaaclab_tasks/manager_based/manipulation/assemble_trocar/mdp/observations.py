@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -22,9 +27,8 @@ Notes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv

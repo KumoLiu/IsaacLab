@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -26,8 +31,12 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
+
 from isaaclab_tasks.manager_based.manipulation.assemble_trocar import mdp
-from isaaclab_tasks.manager_based.manipulation.assemble_trocar.config import G1RobotPresets, CameraPresets  # isort: skip
+from isaaclab_tasks.manager_based.manipulation.assemble_trocar.config import (  # isort: skip
+    CameraPresets,
+    G1RobotPresets,
+)
 
 joint_names = [
     "left_hip_pitch_joint",
@@ -81,8 +90,7 @@ offset_dict = {
 
 # FIXME(mingxinz): revisit the USD_ROOT
 USD_ROOT = (
-    "https://isaac-dev.ov.nvidia.com/omni/web3/omniverse://isaac-dev.ov.nvidia.com/"
-    "Library/IsaacHealthcare/0.5.0/Props/"
+    "https://isaac-dev.ov.nvidia.com/omni/web3/omniverse://isaac-dev.ov.nvidia.com/Library/IsaacHealthcare/0.5.0/Props/"
 )
 
 

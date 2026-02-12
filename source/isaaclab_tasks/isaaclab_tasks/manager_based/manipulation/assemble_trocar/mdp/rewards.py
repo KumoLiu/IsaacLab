@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -15,9 +20,9 @@
 
 from __future__ import annotations
 
+import torch
 from typing import TYPE_CHECKING
 
-import torch
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import quat_apply
@@ -324,8 +329,9 @@ def get_trocar_tip_position(
     Returns:
         torch.Tensor: Shape (num_envs, 3) - Position in world coordinates
     """
-    import isaaclab.utils.math as math_utils
     from pxr import Gf, Usd, UsdGeom
+
+    import isaaclab.utils.math as math_utils
 
     # Cache the tip offset to avoid recalculating every step
     cache_key = f"_tip_offset_{asset_cfg.name}"

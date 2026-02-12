@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -18,7 +23,8 @@ public camera configuration
 include the basic configuration for different types of cameras, support scene-specific parameter customization
 """
 
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Tuple
+from collections.abc import Sequence
 
 import isaaclab.sim as sim_utils
 from isaaclab.sensors import CameraCfg
@@ -42,10 +48,10 @@ class CameraBaseCfg:
         focal_length: float = 7.6,
         focus_distance: float = 400.0,
         horizontal_aperture: float = 20.0,
-        clipping_range: Tuple[float, float] = (0.1, 1.0e5),
-        pos_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-        rot_offset: Tuple[float, float, float, float] = (0.5, -0.5, 0.5, -0.5),
-        data_types: Optional[Sequence[str]] = None,
+        clipping_range: tuple[float, float] = (0.1, 1.0e5),
+        pos_offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        rot_offset: tuple[float, float, float, float] = (0.5, -0.5, 0.5, -0.5),
+        data_types: Sequence[str] | None = None,
     ) -> CameraCfg:
         """Get a pinhole camera configuration.
 

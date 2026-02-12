@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -31,7 +36,7 @@ from isaaclab.assets import ArticulationCfg
 from isaaclab.utils import configclass
 
 # Default joint positions for the supported setup (G1 29DOF + Dex3).
-DEFAULT_JOINT_POS: Dict[str, float] = {
+DEFAULT_JOINT_POS: dict[str, float] = {
     # legs
     "left_hip_pitch_joint": 0.0,
     "left_hip_roll_joint": 0.0,
@@ -57,7 +62,6 @@ DEFAULT_JOINT_POS: Dict[str, float] = {
     "left_wrist_roll_joint": 0.320559,
     "left_wrist_pitch_joint": -0.203525,
     "left_wrist_yaw_joint": -0.387435,
-
     "right_shoulder_pitch_joint": -0.340858,
     "right_shoulder_roll_joint": -0.186152,
     "right_shoulder_yaw_joint": 0.015023,
@@ -73,7 +77,6 @@ DEFAULT_JOINT_POS: Dict[str, float] = {
     "left_hand_middle_1_joint": -40.0 * np.pi / 180.0,
     "left_hand_thumb_1_joint": 0.0,
     "left_hand_thumb_2_joint": 0.0,
-    
     # dexterous hand joint - right hand
     "right_hand_index_0_joint": 60.0 * np.pi / 180.0,
     "right_hand_middle_0_joint": 60.0 * np.pi / 180.0,
@@ -87,9 +90,7 @@ DEFAULT_JOINT_POS: Dict[str, float] = {
 
 G129_CFG_WITH_DEX3_BASE_FIX = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=(
-            "/mnt/Data/lw_v3/robots/g1_29dof_with_dex3_base_fix.usd"
-        ),
+        usd_path="/mnt/Data/lw_v3/robots/g1_29dof_with_dex3_base_fix.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -288,9 +289,9 @@ G129_CFG_WITH_DEX3_BASE_FIX = ArticulationCfg(
 def make_g1_29dof_dex3_cfg(
     *,
     prim_path: str = "/World/envs/env_.*/Robot",
-    init_pos: Tuple[float, float, float] = (-0.15, 0.0, 0.744),
-    init_rot: Tuple[float, float, float, float] = (0.7071, 0, 0, 0.7071),
-    custom_joint_pos: Optional[Dict[str, float]] = None,
+    init_pos: tuple[float, float, float] = (-0.15, 0.0, 0.744),
+    init_rot: tuple[float, float, float, float] = (0.7071, 0, 0, 0.7071),
+    custom_joint_pos: dict[str, float] | None = None,
     base_config: ArticulationCfg = G129_CFG_WITH_DEX3_BASE_FIX,
 ) -> ArticulationCfg:
     """Create the only supported robot articulation cfg for this task."""
@@ -315,8 +316,8 @@ class G1RobotPresets:
     @classmethod
     def g1_29dof_dex3_base_fix(
         cls,
-        init_pos: Tuple[float, float, float] = (-0.15, 0.0, 0.76),
-        init_rot: Tuple[float, float, float, float] = (0.7071, 0, 0, 0.7071),
+        init_pos: tuple[float, float, float] = (-0.15, 0.0, 0.76),
+        init_rot: tuple[float, float, float, float] = (0.7071, 0, 0, 0.7071),
     ) -> ArticulationCfg:
         """pick-place task configuration - dex3 hand"""
         return make_g1_29dof_dex3_cfg(init_pos=init_pos, init_rot=init_rot)
