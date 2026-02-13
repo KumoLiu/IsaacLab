@@ -23,7 +23,7 @@ Usage:
 
     # Train with task override
     isaaclab.sh -p train.py --config_name isaaclab_ppo_gr00t_assemble_trocar \\
-        --task Isaac-Assemble-Trocar-G129-Dex3-RLinf-v0
+        --task Isaac-Install-Trocar-G129-Dex3-RLinf-v0
 
     # Train with custom settings
     isaaclab.sh -p train.py --config_name isaaclab_ppo_gr00t_assemble_trocar \\

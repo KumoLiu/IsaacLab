@@ -21,3 +21,10 @@ The extension module (``extension.py``) is loaded by RLinf via the
 1. Registering IsaacLab tasks into RLinf's ``REGISTER_ISAACLAB_ENVS``
 2. Registering GR00T obs/action converters
 3. Patching GR00T ``get_model`` for custom embodiments
+
+Usage:
+    .. code-block:: bash
+
+        export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
+        export RLINF_CONFIG_FILE="/path/to/config.yaml"
+"""

@@ -25,6 +25,9 @@ Usage:
     isaaclab.sh -p play.py --config_name isaaclab_ppo_gr00t_assemble_trocar \\
         --model_path /path/to/checkpoint --num_envs 8
 
+Note:
+    Evaluation requires the full RLinf infrastructure since VLA models
+    are too large to run on a single GPU without FSDP.
 """
 
 import argparse

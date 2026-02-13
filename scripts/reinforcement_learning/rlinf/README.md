@@ -8,7 +8,7 @@ RLinf is a flexible and scalable open-source RL infrastructure designed for Embo
 
 - Fine-tune pretrained VLA models on IsaacLab tasks using PPO / Actor-Critic / SAC
 - Leverage RLinf's FSDP-based distributed training across multiple GPUs/nodes
-- Define observation/action mappings from IsaacLab to GR00T format via YAML config
+- Define observation/action mappings from IsaacLab to GR00T format via a single YAML config
 - Register IsaacLab tasks into RLinf without modifying RLinf source code
 
 ## Architecture
@@ -38,11 +38,10 @@ RLinf is a flexible and scalable open-source RL infrastructure designed for Embo
 
 ```
 scripts/reinforcement_learning/rlinf/
-├── README.md               # This file
+├── README.md                # This file
 ├── train.py                 # Training entry point (launches RLinf distributed training)
 ├── play.py                  # Evaluation entry point (launches RLinf eval runner)
-├── run.sh                   # Shell wrapper for training (sets env vars, PYTHONPATH)
-└── play.sh                  # Shell wrapper for evaluation
+└── cli_args.py              # Shared CLI argument definitions
 ```
 
 **Extension module** (in `source/isaaclab_rl/`):
@@ -53,12 +52,22 @@ source/isaaclab_rl/isaaclab_rl/rlinf/
 └── extension.py             # RLinf extension: task registration, obs/action conversion
 ```
 
+**Task-specific config** (in `source/isaaclab_tasks/`):
+
+```
+source/isaaclab_tasks/isaaclab_tasks/manager_based/manipulation/assemble_trocar/
+├── config/
+│   └── isaaclab_ppo_gr00t_assemble_trocar.yaml   # Single YAML config (Hydra)
+├── g129_dex3_env_cfg.py                           # IsaacLab environment config
+└── rl_ppo_cfg.py                                  # Python-first RLinf config (reference)
+```
+
 ## Prerequisites
 
 - **IsaacLab** installed and configured
-- **RLinf** available in the parent repo (expected at `../../rlinf` relative to IsaacLab root)
-- **GR00T** model (for VLA inference and data transforms)
-- A **pretrained VLA checkpoint** in HuggingFace format (e.g., GR00T fine-tuned model)
+- **RLinf** available in the parent directory (expected at `../` relative to IsaacLab root, overridable via `RLINF_ROOT`)
+- **GR00T** model and Isaac-GR00T repo (for VLA inference and data transforms)
+- A **pretrained VLA checkpoint** in HuggingFace format
 - Multi-GPU setup recommended (FSDP requires at least 1 GPU)
 
 ## Quick Start
@@ -66,41 +75,42 @@ source/isaaclab_rl/isaaclab_rl/rlinf/
 ### Training
 
 ```bash
-# Basic training with a config file
-bash run.sh --config_name isaaclab_ppo_gr00t_assemble_trocar
+# Basic training (uses default config)
+python train.py
+
+# Training with a specific config
+python train.py --config_name isaaclab_ppo_gr00t_assemble_trocar
 
 # Training with task override
-bash run.sh --config_name isaaclab_ppo_gr00t_assemble_trocar \
-    --task Isaac-Install-Trocar-G129-Dex3-RLinf-v0
+python train.py --task Isaac-Assemble-Trocar-G129-Dex3-RLinf-v0
+
+# Training with custom settings
+python train.py --num_envs 64 --max_epochs 1000
 
 # List available tasks
-bash run.sh --list_tasks
+python train.py --list_tasks
 ```
 
 ### Evaluation
 
 ```bash
 # Evaluate a trained checkpoint
-bash play.sh --config_name isaaclab_ppo_gr00t_assemble_trocar \
-    --model_path /path/to/checkpoint
+python play.py --model_path /path/to/checkpoint
 
 # Evaluate with video recording
-bash play.sh --config_name isaaclab_ppo_gr00t_assemble_trocar \
-    --model_path /path/to/checkpoint --video
+python play.py --model_path /path/to/checkpoint --video
+
+# Evaluate with specific number of environments
+python play.py --model_path /path/to/checkpoint --num_envs 8
 ```
 
 ## Configuration
 
-Configuration uses [Hydra](https://hydra.cc/) with YAML composition. The top-level config file composes from `env/` and `model/` defaults.
+All configuration lives in a **single YAML file** loaded by [Hydra](https://hydra.cc/). By default, `train.py` and `play.py` use `isaaclab_ppo_gr00t_assemble_trocar.yaml`. Override with `--config_path` and `--config_name`.
 
-### Top-Level Config Structure
+### Config Structure Overview
 
 ```yaml
-defaults:
-  - env/isaaclab_assemble_trocar@env.train    # Env defaults → env.train
-  - env/isaaclab_assemble_trocar@env.eval     # Env defaults → env.eval
-  - model/gr00t@actor.model                   # Model defaults → actor.model
-
 cluster:
   num_nodes: 1
   component_placement:
@@ -122,22 +132,29 @@ env:
   train:
     total_num_envs: 4
     max_episode_steps: 256
+    init_params:
+      id: "Isaac-Assemble-Trocar-G129-Dex3-RLinf-v0"
     isaaclab: &isaaclab_config                # IsaacLab ↔ RLinf mapping (see below)
       ...
   eval:
     isaaclab: *isaaclab_config                # Reuse via YAML anchor
 
-actor:
-  training_backend: "fsdp"
-  micro_batch_size: 2
-  global_batch_size: 4
-  optim:
-    lr: 5e-6
-
 rollout:
   backend: "huggingface"
   model:
     model_path: "/path/to/pretrained/model"
+    obs_converter_type: ${env.train.isaaclab.obs_converter_type}
+    embodiment_tag: ${env.train.isaaclab.embodiment_tag}
+
+actor:
+  training_backend: "fsdp"
+  micro_batch_size: 2
+  global_batch_size: 4
+  model:
+    obs_converter_type: ${env.train.isaaclab.obs_converter_type}
+    embodiment_tag: ${env.train.isaaclab.embodiment_tag}
+  optim:
+    lr: 5e-6
 ```
 
 ### IsaacLab ↔ RLinf Observation/Action Mapping
@@ -145,7 +162,7 @@ rollout:
 The `env.train.isaaclab` section defines how IsaacLab observations are converted to GR00T format. This is the key configuration block for adapting new tasks:
 
 ```yaml
-isaaclab:
+isaaclab: &isaaclab_config
   # Task description for language conditioning
   task_description: "assemble trocar from tray"
 
@@ -181,11 +198,12 @@ isaaclab:
     prefix_pad: 15                           # Pad zeros for uncontrolled joints
     suffix_pad: 0
 
-  # --- GR00T model config ---
-  obs_converter_type: "isaaclab"
+  # --- GR00T model configuration (single source of truth) ---
+  # Referenced by actor.model and rollout.model via Hydra ${} interpolation
+  obs_converter_type: "dex3"
   embodiment_tag: "new_embodiment"
   embodiment_tag_id: 31
-  data_config_class: "policy.gr00t_config:IsaacLabDataConfig"
+  data_config_class: "gr00t_config:IsaacLabDataConfig"
 ```
 
 ## CLI Arguments
@@ -194,8 +212,9 @@ isaaclab:
 
 | Argument | Description |
 |---|---|
+| `--config_path` | Path to config directory (defaults to task config dir) |
 | `--config_name` | Name of the Hydra config file (without `.yaml`) |
-| `--task` | IsaacLab task ID (optional, read from config if omitted) |
+| `--task` | IsaacLab task ID (overrides YAML config if set) |
 | `--num_envs` | Number of parallel environments |
 | `--seed` | Random seed |
 | `--model_path` | Path to pretrained VLA checkpoint |
@@ -228,42 +247,20 @@ isaaclab:
 
 To add a new IsaacLab task for RLinf training:
 
-### 1. Create Environment Config
+### 1. Create a YAML Config
 
-Create `config/env/isaaclab_my_task.yaml`:
+Create a new YAML config file (e.g., `isaaclab_ppo_gr00t_my_task.yaml`) in your task's `config/` directory. Use the existing `isaaclab_ppo_gr00t_assemble_trocar.yaml` as a template.
 
-```yaml
-env_type: isaaclab
-total_num_envs: null
-auto_reset: False
-max_episode_steps: 256
-max_steps_per_rollout_epoch: 10
+Key sections to customize:
 
-init_params:
-  id: "Isaac-MyTask-v0"
-  num_envs: null
-  max_episode_steps: ${env.train.max_episode_steps}
-  task_description: "my task description"
-  table_cam:
-    height: 256
-    width: 256
-  wrist_cam:
-    height: 256
-    width: 256
-```
-
-### 2. Create Top-Level Config
-
-Create `config/isaaclab_ppo_gr00t_my_task.yaml` following the existing example. Key sections to customize:
-
-- `env.train.init_params.id` — your task's gym ID
+- `env.train.init_params.id` — your task's gymnasium ID
 - `env.train.isaaclab` — observation/action mapping for your embodiment
 - `actor.model.model_path` / `rollout.model.model_path` — your pretrained checkpoint
 - `actor.model.action_dim` — total action dimensions
 
-### 3. Create GR00T Data Config (if needed)
+### 2. Create GR00T Data Config (if needed)
 
-If your embodiment differs from the default G1+Dex3, create a new data config class in `policy/gr00t_config.py`:
+If your embodiment differs from the default, create a new data config class in your config directory (e.g., `gr00t_config.py`):
 
 ```python
 class MyTaskDataConfig(BaseDataConfig):
@@ -276,34 +273,34 @@ class MyTaskDataConfig(BaseDataConfig):
 Reference it in your YAML config:
 
 ```yaml
-data_config_class: "policy.gr00t_config:MyTaskDataConfig"
+data_config_class: "gr00t_config:MyTaskDataConfig"
 ```
 
-### 4. Register the Task
+### 3. Register the Task
 
-The task is registered automatically at runtime via the extension module. Simply set the task ID in your config or pass `--task Isaac-MyTask-v0`.
+The task is registered automatically at runtime via the extension module. Task IDs are read from `env.train.init_params.id` and `env.eval.init_params.id` in the YAML config. You can also override with `--task`.
 
-### 5. Run Training
+### 4. Run Training
 
 ```bash
-bash run.sh --config_name isaaclab_ppo_gr00t_my_task
+python train.py --config_path /path/to/your/config/dir \
+    --config_name isaaclab_ppo_gr00t_my_task
 ```
 
 ## Logging
 
 Logs are saved to `logs/rlinf/<timestamp>-<task_name>/` and include:
 
-- `run.log` / `play.log` — full console output
 - TensorBoard / WandB / SwanLab logs (based on `--logger`)
 - Video recordings (when `--video` is enabled or `video_cfg.save_video: True`)
 - Model checkpoints (saved every `save_interval` epochs)
 
 ## Key Environment Variables
 
+These are set automatically by `train.py` / `play.py` — you typically do not need to set them manually:
+
 | Variable | Description |
 |---|---|
-| `RLINF_EXT_MODULE` | Extension module path (set by `run.sh` / `play.sh`) |
-| `RLINF_ISAACLAB_TASKS` | Comma-separated list of task IDs to register |
+| `RLINF_EXT_MODULE` | Extension module path (`isaaclab_rl.rlinf.extension`) |
 | `RLINF_CONFIG_FILE` | Full path to the Hydra config YAML |
-| `RLINF_CONFIG_NAME` | Config file name (without extension) |
-| `RLINF_LOG_DIR` | Log output directory |
+| `RLINF_ROOT` | (Optional) Override RLinf repo location (defaults to IsaacLab's parent directory) |
