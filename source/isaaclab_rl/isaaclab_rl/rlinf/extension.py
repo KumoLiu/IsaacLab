@@ -171,6 +171,7 @@ def _patch_gr00t_get_model(cfg: dict) -> None:
         from rlinf.models.embodiment.gr00t.gr00t_action_model import GR00T_N1_5_ForRLActionPrediction
         from rlinf.models.embodiment.gr00t.utils import replace_dropout_with_identity
         from rlinf.utils.patcher import Patcher
+
         # Apply RLinf's standard EmbodimentTag patches
         Patcher.clear()
         Patcher.add_patch(
@@ -387,6 +388,7 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
                 sim_app = AppLauncher(headless=True, enable_cameras=True).app
                 import gymnasium as gym
+
                 from isaaclab_tasks.utils import load_cfg_from_registry
 
                 isaac_env_cfg = load_cfg_from_registry(self.isaaclab_env_id, "env_cfg_entry_point")

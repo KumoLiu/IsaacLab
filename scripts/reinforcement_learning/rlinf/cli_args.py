@@ -78,6 +78,7 @@ def update_rlinf_cfg(agent_cfg, args_cli: argparse.Namespace):
         The updated configuration for RLinf agent based on inputs.
     """
     from dataclasses import is_dataclass
+
     # Check if it's a dataclass (IsaacLab style) or DictConfig (Hydra style)
     if is_dataclass(agent_cfg):
         return _update_dataclass_cfg(agent_cfg, args_cli)

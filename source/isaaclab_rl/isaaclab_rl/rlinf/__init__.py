@@ -26,5 +26,5 @@ Usage:
     .. code-block:: bash
 
         export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
-        export RLINF_ISAACLAB_TASKS="Isaac-MyTask-v0"
+        export RLINF_CONFIG_FILE="/path/to/config.yaml"
 """
