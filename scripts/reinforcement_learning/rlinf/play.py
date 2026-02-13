@@ -94,10 +94,19 @@ except ImportError:
     sys.exit(1)
 
 # Set config-related environment variables
-if args_cli.config_name:
-    config_file = SCRIPT_DIR / "config" / f"{args_cli.config_name}.yaml"
-    os.environ["RLINF_CONFIG_FILE"] = str(config_file)
-    os.environ["RLINF_CONFIG_NAME"] = args_cli.config_name
+_config_dir = (
+    ISAACLAB_DIR
+    / "source/isaaclab_tasks/isaaclab_tasks/manager_based/manipulation/assemble_trocar/config"
+)
+os.environ["RLINF_CONFIG_FILE"] = str(_config_dir / "isaaclab_ppo_gr00t_assemble_trocar.yaml")
+os.environ["RLINF_CONFIG_NAME"] = "isaaclab_ppo_gr00t_assemble_trocar"
+
+# Add config dir to PYTHONPATH so that Ray rollout workers can resolve
+# data_config_class references like "gr00t_config:IsaacLabDataConfig"
+# (GR00T's load_data_config uses importlib.import_module on the module part).
+_cfg_dir_str = str(_config_dir)
+if _cfg_dir_str not in os.environ.get("PYTHONPATH", ""):
+    os.environ["PYTHONPATH"] = _cfg_dir_str + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 if args_cli.task:
     os.environ["RLINF_ISAACLAB_TASKS"] = args_cli.task

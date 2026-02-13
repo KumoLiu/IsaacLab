@@ -110,12 +110,60 @@ env:
       num_envs: null
       max_episode_steps: ${env.train.max_episode_steps}
       task_description: "install trocar from box"
-      table_cam:
-        height: 256
-        width: 256
-      wrist_cam:
-        height: 256
-        width: 256
+
+    # ========================================================================
+    # IsaacLab -> RLinf -> GR00T observation/action mapping configuration
+    # This section defines how IsaacLab observations are converted to GR00T format
+    # ========================================================================
+    isaaclab: &isaaclab_config  # YAML anchor for reuse in eval
+      # Task description for language conditioning
+      task_description: "install trocar from box"
+      
+      # --- IsaacLab -> RLinf observation mapping ---
+      # main_images: single camera key for main view
+      main_images: "front_camera"
+      # extra_view_images: list of camera keys to stack as (B, N, H, W, C)
+      extra_view_images:
+        - "left_wrist_camera"
+        - "right_wrist_camera"
+      # states: list of state specs with optional slicing
+      # Each entry can be a string (use full tensor) or dict with "key" and "slice"
+      states:
+        - key: "robot_joint_state"
+          slice: [15, 29]  # G129 shoulder joints
+        - key: "robot_dex3_joint_state"
+          # slice: null  # Use full tensor
+      
+      # --- RLinf -> GR00T format conversion ---
+      gr00t_mapping:
+        video:
+          main_images: "video.room_view"
+          extra_view_images:
+            - "video.left_wrist_view"
+            - "video.right_wrist_view"
+        state:
+          # Slice concatenated states into GR00T state keys
+          # Total states: 14 (shoulder) + 14 (dex3) = 28 dims
+          - gr00t_key: "state.left_arm"
+            slice: [0, 7]
+          - gr00t_key: "state.right_arm"
+            slice: [7, 14]
+          - gr00t_key: "state.left_hand"
+            slice: [14, 21]
+          - gr00t_key: "state.right_hand"
+            slice: [21, 28]
+      
+      # --- GR00T -> IsaacLab action conversion ---
+      action_mapping:
+        prefix_pad: 15  # Pad zeros at front for G129 body joints (not controlled)
+        suffix_pad: 0
+      
+      # --- GR00T model configuration (single source of truth) ---
+      # actor.model.embodiment_tag and obs_converter_type reference these values via ${}
+      obs_converter_type: "isaaclab"
+      embodiment_tag: "new_embodiment"
+      embodiment_tag_id: 31
+      data_config_class: "gr00t_config:IsaacLabDataConfig"
 
   eval:
     env_type: isaaclab
@@ -138,12 +186,8 @@ env:
       num_envs: null
       max_episode_steps: ${env.eval.max_episode_steps}
       task_description: "install trocar from box"
-      table_cam:
-        height: 256
-        width: 256
-      wrist_cam:
-        height: 256
-        width: 256
+    # Reuse IsaacLab config from train section via YAML anchor
+    isaaclab: *isaaclab_config
 
 # ---------------------------------------------------------------------------
 # Rollout
@@ -188,8 +232,8 @@ actor:
     num_action_chunks: 1
     denoising_steps: 4
     policy_setup: "widowx_bridge"
-    obs_converter_type: "dex3"
-    embodiment_tag: "new_embodiment"
+    obs_converter_type: ${env.train.isaaclab.obs_converter_type}
+    embodiment_tag: ${env.train.isaaclab.embodiment_tag}
     add_value_head: True
     rl_head_config:
       joint_logprob: False

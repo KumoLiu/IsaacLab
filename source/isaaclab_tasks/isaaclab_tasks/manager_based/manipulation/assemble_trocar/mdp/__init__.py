@@ -1,9 +1,4 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,13 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MDP utilities for the install_trocar task."""
-
-from __future__ import annotations
+"""MDP utilities for the assemble_trocar task."""
 
 from isaaclab.envs.mdp import JointPositionActionCfg, time_out
 
-from .events import reset_box_with_random_rotation, reset_task_stage
+from .events import reset_robot_to_default_joint_positions, reset_task_stage, reset_tray_with_random_rotation
 from .observations import get_robot_body_joint_states, get_robot_dex3_joint_states
 from .rewards import (
     lift_trocars_reward,
@@ -40,7 +33,8 @@ __all__ = [
     "time_out",
     "get_robot_body_joint_states",
     "get_robot_dex3_joint_states",
-    "reset_box_with_random_rotation",
+    "reset_tray_with_random_rotation",
+    "reset_robot_to_default_joint_positions",
     "reset_task_stage",
     "update_task_stage",
     "lift_trocars_reward",

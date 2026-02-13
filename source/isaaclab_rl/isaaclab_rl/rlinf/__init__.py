@@ -9,24 +9,8 @@
 
 """RLinf integration for IsaacLab.
 
-This module provides the extension mechanism for integrating IsaacLab tasks
+This package provides the extension mechanism for integrating IsaacLab tasks
 with RLinf's distributed RL training framework for VLA models like GR00T.
-
-Configuration Classes
----------------------
-
-The module exposes :class:`RLinfIsaacLabCfg` and its sub-configs so that task
-authors can define structured, validated RLinf configurations — the same way
-RSL-RL tasks define :class:`~isaaclab_rl.rsl_rl.rl_cfg.RslRlOnPolicyRunnerCfg`.
-
-.. code-block:: python
-
-    from isaaclab_rl.rlinf import RLinfIsaacLabCfg, RLinfStateSpecCfg
-
-    class MyTaskRLinfCfg(RLinfIsaacLabCfg):
-        task_description = "pick up the box"
-        main_images = "front_camera"
-        states = [RLinfStateSpecCfg(key="joint_pos")]
 
 Extension Module
 ----------------
@@ -44,21 +28,3 @@ Usage:
         export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
         export RLINF_ISAACLAB_TASKS="Isaac-MyTask-v0"
 """
-
-from .rl_cfg import (
-    RLinfActionMappingCfg,
-    RLinfGR00TMappingCfg,
-    RLinfGR00TStateMappingCfg,
-    RLinfGR00TVideoMappingCfg,
-    RLinfIsaacLabCfg,
-    RLinfStateSpecCfg,
-)
-
-__all__ = [
-    "RLinfActionMappingCfg",
-    "RLinfGR00TMappingCfg",
-    "RLinfGR00TStateMappingCfg",
-    "RLinfGR00TVideoMappingCfg",
-    "RLinfIsaacLabCfg",
-    "RLinfStateSpecCfg",
-]
