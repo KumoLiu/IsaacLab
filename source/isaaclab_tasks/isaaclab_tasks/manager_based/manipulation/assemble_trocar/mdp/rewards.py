@@ -20,8 +20,9 @@
 
 from __future__ import annotations
 
-import torch
 from typing import TYPE_CHECKING
+
+import torch
 
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
@@ -306,8 +307,8 @@ def lift_trocars_reward(
         print(
             f" Stage: {stage[0].item()}"
             f" | Lift ({mode_str}): {reward[0].item():.2f}"
-            f" | z1: {pos1[0,2]:.3f}"
-            f" | z2: {pos2[0,2]:.3f}"
+            f" | z1: {pos1[0, 2]:.3f}"
+            f" | z2: {pos2[0, 2]:.3f}"
         )
 
     return reward
@@ -487,8 +488,8 @@ def trocar_tip_alignment_reward(
         mode_str = "Sparse" if use_sparse_reward else "Dense"
         print(
             f"   └─ Stage 1 (Find Hole, {mode_str}):"
-            f" tip_pos_1=({tip_pos1[0,0]:.3f}, {tip_pos1[0,1]:.3f}, {tip_pos1[0,2]:.3f})"
-            f" | tip_pos_2=({tip_pos2[0,0]:.3f}, {tip_pos2[0,1]:.3f}, {tip_pos2[0,2]:.3f})"
+            f" tip_pos_1=({tip_pos1[0, 0]:.3f}, {tip_pos1[0, 1]:.3f}, {tip_pos1[0, 2]:.3f})"
+            f" | tip_pos_2=({tip_pos2[0, 0]:.3f}, {tip_pos2[0, 1]:.3f}, {tip_pos2[0, 2]:.3f})"
             f" | tip_d={tip_dist[0].item():.4f}"
             f" | reward={reward[0].item():.3f}"
         )
@@ -728,7 +729,7 @@ def trocar_placement_reward(
         mode_str = "Sparse" if use_sparse_reward else "Dense"
         print(
             f"   └─ Stage 3 (Placement, {mode_str}): in_zone={both_in_zone[0].item()} | "
-            f"z1={pos1[0,2]:.3f} | z2={pos2[0,2]:.3f}"
+            f"z1={pos1[0, 2]:.3f} | z2={pos2[0, 2]:.3f}"
         )
 
     return reward

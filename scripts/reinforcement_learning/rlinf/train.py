@@ -41,40 +41,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Environment bootstrap — replaces the need for a separate run.sh wrapper.
-# Sets up PYTHONPATH, environment variables, and validates that RLinf is
-# reachable before any heavy imports.
-# ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent.absolute()
-ISAACLAB_DIR = SCRIPT_DIR.parent.parent.parent  # scripts/reinforcement_learning/rlinf -> IsaacLab root
-RLINF_ROOT = ISAACLAB_DIR.parent  # parent of IsaacLab (where rlinf/ lives)
+# TODO: Remove this sys.path / PYTHONPATH hack once rlinf is pip-installable.
+RLINF_ROOT = os.environ.get("RLINF_ROOT", str(SCRIPT_DIR.parents[3]))
+if RLINF_ROOT not in sys.path:
+    sys.path.insert(0, RLINF_ROOT)
+if RLINF_ROOT not in os.environ.get("PYTHONPATH", ""):
+    os.environ["PYTHONPATH"] = RLINF_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")
 
-# Add RLinf and IsaacLab source packages to sys.path so they are importable
-# without requiring a pip install of RLinf.
-# NOTE: The IsaacLab source directories MUST be included so that the user's
-# workspace version (with custom tasks like install_trocar) takes priority
-# over the Docker-bundled stock isaaclab_tasks. Without these, `import
-# isaaclab_tasks` finds the stock version which has no custom tasks, and
-# gym.register() for the custom task never runs.
-_paths_to_add = [
-    str(RLINF_ROOT),  # for `import rlinf`
-]
-for _p in _paths_to_add:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-# Also prepend to PYTHONPATH env var so that Ray worker processes (which don't
-# inherit sys.path) can find rlinf and other modules.
-_existing_pythonpath = os.environ.get("PYTHONPATH", "")
-_new_entries = os.pathsep.join(_paths_to_add)
-if _new_entries not in _existing_pythonpath:
-    os.environ["PYTHONPATH"] = _new_entries + (os.pathsep + _existing_pythonpath if _existing_pythonpath else "")
-
-# Set RLinf environment variables (previously done in run.sh)
+# required for RLinf to register IsaacLab tasks and converters
 os.environ.setdefault("RLINF_EXT_MODULE", "isaaclab_rl.rlinf.extension")
 
-import cli_args  # noqa: E402
+# local imports
+import cli_args  # noqa: E402  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RLinf.")
@@ -88,6 +67,21 @@ parser.add_argument("--model_path", type=str, default=None, help="Path to pretra
 # append RLinf cli arguments
 cli_args.add_rlinf_args(parser)
 args_cli = parser.parse_args()
+
+# Default config directory (task-specific YAML lives here)
+_DEFAULT_CONFIG_DIR = str(
+    SCRIPT_DIR.parents[2] / "source/isaaclab_tasks/isaaclab_tasks/manager_based/manipulation/assemble_trocar/config"
+)
+_DEFAULT_CONFIG_NAME = "isaaclab_ppo_gr00t_assemble_trocar"
+# Resolve config path and name from CLI args (--config_path / --config_name) with defaults
+config_dir = args_cli.config_path or _DEFAULT_CONFIG_DIR
+config_name = args_cli.config_name or _DEFAULT_CONFIG_NAME
+os.environ["RLINF_CONFIG_FILE"] = str(Path(config_dir) / f"{config_name}.yaml")
+
+# Add config dir to PYTHONPATH so that Ray rollout workers can resolve
+# data_config_class references like "gr00t_config:IsaacLabDataConfig"
+if config_dir not in os.environ.get("PYTHONPATH", ""):
+    os.environ["PYTHONPATH"] = config_dir + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 # Handle --list_tasks before any heavy imports
 if args_cli.list_tasks:
@@ -108,26 +102,8 @@ if args_cli.list_tasks:
     print("\n" + "=" * 60)
     sys.exit(0)
 
-# Validate that RLinf is importable
-try:
-    import rlinf  # noqa: F401
-except ImportError:
-    print(f"ERROR: Cannot import rlinf. Expected RLinf repo at: {RLINF_ROOT}/rlinf")
-    print("Please clone RLinf into the parent directory of IsaacLab:")
-    print(f"  git clone https://github.com/RLinf/RLinf.git {RLINF_ROOT}")
-    sys.exit(1)
-
-# Set config-related environment variables
-if args_cli.config_name:
-    config_file = SCRIPT_DIR / "config" / f"{args_cli.config_name}.yaml"
-    os.environ["RLINF_CONFIG_FILE"] = str(config_file)
-    os.environ["RLINF_CONFIG_NAME"] = args_cli.config_name
-
-if args_cli.task:
-    os.environ["RLINF_ISAACLAB_TASKS"] = args_cli.task
-
 """Rest of the script - launch RLinf training."""
-
+import rlinf  # noqa: F401
 import torch.multiprocessing as mp  # noqa: E402
 from hydra import compose, initialize_config_dir  # noqa: E402
 from hydra.core.global_hydra import GlobalHydra  # noqa: E402
@@ -144,35 +120,14 @@ logger = logging.getLogger(__name__)
 mp.set_start_method("spawn", force=True)
 
 
-def get_config_path_and_name(args_cli) -> tuple[Path, str]:
-    """Get config path and name.
-
-    Priority:
-    1. RLINF_CONFIG_FILE environment variable (full path)
-    2. CLI --config_name argument (looks in rlinf/config directory)
-    """
-    config_file = os.environ.get("RLINF_CONFIG_FILE", "")
-    if config_file:
-        return Path(config_file).parent, Path(config_file).stem
-
-    config_path = SCRIPT_DIR / "config"
-
-    if args_cli.config_name:
-        return config_path, args_cli.config_name
-
-    raise FileNotFoundError("No config found. Set RLINF_CONFIG_FILE or --config_name")
-
-
 def main():
     """Launch RLinf training."""
-    # Get config (task_id is read from YAML)
-    config_path, config_name = get_config_path_and_name(args_cli)
     print(f"[INFO] Using config: {config_name}")
-    print(f"[INFO] Config path: {config_path}")
+    print(f"[INFO] Config path: {config_dir}")
 
     # Initialize Hydra and load config
     GlobalHydra.instance().clear()
-    initialize_config_dir(config_dir=str(config_path), version_base="1.1")
+    initialize_config_dir(config_dir=config_dir, version_base="1.1")
     cfg = compose(config_name=config_name)
 
     # Get task_id from config
@@ -180,18 +135,19 @@ def main():
     print(f"[INFO] Task: {task_id}")
 
     # Setup logging directory
-    if os.environ.get("RLINF_LOG_DIR"):
-        log_dir = Path(os.environ["RLINF_LOG_DIR"])
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
-        log_dir = SCRIPT_DIR / "logs" / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}"
+    timestamp = datetime.now().strftime("%Y%m%d-%H:%M:%S")
+    log_dir = SCRIPT_DIR / "logs" / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}"
     log_dir.mkdir(parents=True, exist_ok=True)
-    os.environ["RLINF_LOG_DIR"] = str(log_dir)
     print(f"[INFO] Logging to: {log_dir}")
 
     # Apply runtime overrides from CLI arguments
     with open_dict(cfg):
         cfg.runner.logger.log_path = str(log_dir)
+
+        # Override task if provided via CLI
+        if args_cli.task:
+            cfg.env.train.init_params.id = args_cli.task
+            cfg.env.eval.init_params.id = args_cli.task
 
         # Override from CLI if provided
         if args_cli.num_envs is not None:

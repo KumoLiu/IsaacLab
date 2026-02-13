@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2022-2026, The Isaac Lab Project Developers.
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
@@ -33,16 +38,15 @@ from gr00t.model.transforms import GR00TTransform
 
 
 class IsaacLabDataConfig(BaseDataConfig):
-    """Generic GR00T data config for IsaacLab tasks with G1 + Dex3.
-    """
-    
+    """Generic GR00T data config for IsaacLab tasks with G1 + Dex3."""
+
     # Video modality keys (from gr00t_mapping.video in RLINF_OBS_MAP_JSON)
     video_keys = [
         "video.left_wrist_view",
-        "video.right_wrist_view", 
+        "video.right_wrist_view",
         "video.room_view",
     ]
-    
+
     # State modality keys (from gr00t_mapping.state in RLINF_OBS_MAP_JSON)
     state_keys = [
         "state.left_arm",
@@ -50,7 +54,7 @@ class IsaacLabDataConfig(BaseDataConfig):
         "state.left_hand",
         "state.right_hand",
     ]
-    
+
     # Action modality keys (output from GR00T model)
     action_keys = [
         "action.left_arm",
@@ -58,10 +62,10 @@ class IsaacLabDataConfig(BaseDataConfig):
         "action.left_hand",
         "action.right_hand",
     ]
-    
+
     # Language annotation key
     language_keys = ["annotation.human.task_description"]
-    
+
     # Observation and action indices
     observation_indices = [0]
     action_indices = list(range(16))

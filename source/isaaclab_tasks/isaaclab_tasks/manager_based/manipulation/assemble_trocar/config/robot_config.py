@@ -27,8 +27,8 @@ This file is intentionally **minimal**:
 The only public entry point expected by the task is
 `G1RobotPresets.g1_29dof_dex3_base_fix(...)`.
 """
+
 import numpy as np
-from typing import Dict, Optional, Tuple
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg

@@ -1,3 +1,8 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 defaults:
   - override hydra/job_logging: stdout
 
@@ -109,7 +114,7 @@ env:
       id: "Isaac-Assemble-Trocar-G129-Dex3-RLinf-v0"
       num_envs: null
       max_episode_steps: ${env.train.max_episode_steps}
-      task_description: "install trocar from box"
+      task_description: "assemble trocar from tray"
 
     # ========================================================================
     # IsaacLab -> RLinf -> GR00T observation/action mapping configuration
@@ -117,8 +122,8 @@ env:
     # ========================================================================
     isaaclab: &isaaclab_config  # YAML anchor for reuse in eval
       # Task description for language conditioning
-      task_description: "install trocar from box"
-      
+      task_description: "assemble trocar from tray"
+
       # --- IsaacLab -> RLinf observation mapping ---
       # main_images: single camera key for main view
       main_images: "front_camera"
@@ -133,7 +138,7 @@ env:
           slice: [15, 29]  # G129 shoulder joints
         - key: "robot_dex3_joint_state"
           # slice: null  # Use full tensor
-      
+
       # --- RLinf -> GR00T format conversion ---
       gr00t_mapping:
         video:
@@ -152,15 +157,15 @@ env:
             slice: [14, 21]
           - gr00t_key: "state.right_hand"
             slice: [21, 28]
-      
+
       # --- GR00T -> IsaacLab action conversion ---
       action_mapping:
         prefix_pad: 15  # Pad zeros at front for G129 body joints (not controlled)
         suffix_pad: 0
-      
+
       # --- GR00T model configuration (single source of truth) ---
       # actor.model.embodiment_tag and obs_converter_type reference these values via ${}
-      obs_converter_type: "isaaclab"
+      obs_converter_type: "dex3"
       embodiment_tag: "new_embodiment"
       embodiment_tag_id: 31
       data_config_class: "gr00t_config:IsaacLabDataConfig"
@@ -206,6 +211,8 @@ rollout:
   model:
     model_path: "/mnt/ckpt/g1_install_trocar_sim_box_v3_60_train_bs32_1_gpus_cos_30k_tune_visual/"
     precision: ${actor.model.precision}
+    obs_converter_type: ${env.train.isaaclab.obs_converter_type}
+    embodiment_tag: ${env.train.isaaclab.embodiment_tag}
 
 # ---------------------------------------------------------------------------
 # Actor

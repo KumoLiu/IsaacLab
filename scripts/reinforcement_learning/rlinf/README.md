@@ -182,7 +182,7 @@ isaaclab:
     suffix_pad: 0
 
   # --- GR00T model config ---
-  obs_converter_type: "isaaclab"
+  obs_converter_type: "dex3"
   embodiment_tag: "new_embodiment"
   embodiment_tag_id: 31
   data_config_class: "policy.gr00t_config:IsaacLabDataConfig"

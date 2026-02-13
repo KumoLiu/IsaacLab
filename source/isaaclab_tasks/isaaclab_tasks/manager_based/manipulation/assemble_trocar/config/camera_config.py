@@ -23,7 +23,6 @@ public camera configuration
 include the basic configuration for different types of cameras, support scene-specific parameter customization
 """
 
-from typing import Optional, Tuple
 from collections.abc import Sequence
 
 import isaaclab.sim as sim_utils

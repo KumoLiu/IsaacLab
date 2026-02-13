@@ -166,7 +166,7 @@ class RLinfIsaacLabCfg:
 
     # -- Model / embodiment config ---------------------------------------------
 
-    obs_converter_type: str = "isaaclab"
+    obs_converter_type: str = "dex3"
     """Converter type name registered in RLinf's ``simulation_io`` registry."""
 
     embodiment_tag: str = "new_embodiment"
