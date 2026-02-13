@@ -124,7 +124,6 @@ def main():
     with open_dict(cfg):
         # Set evaluation mode
         cfg.runner.only_eval = True
-
         # Set logging
         cfg.runner.logger.log_path = str(log_dir)
 

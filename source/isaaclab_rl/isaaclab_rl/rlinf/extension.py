@@ -130,7 +130,6 @@ def _patch_embodiment_tags(cfg: dict) -> None:
     if embodiment_tag in embodiment_tags.EMBODIMENT_TAG_MAPPING:
         logger.info(f"embodiment_tag '{embodiment_tag}' already registered")
         return
-
     # Add to enum
     tag_upper = embodiment_tag.upper().replace("-", "_")
     if not hasattr(embodiment_tags.EmbodimentTag, tag_upper):
@@ -148,13 +147,11 @@ def _patch_embodiment_tags(cfg: dict) -> None:
 
 def _patch_gr00t_get_model(cfg: dict) -> None:
     """Monkeypatch RLinf's GR00T get_model to support custom data_config.
-
     Patch is needed if user specifies a custom data_config_class.
     Also ensures embodiment_tag is registered.
     """
     # Always ensure embodiment tag is registered
     _patch_embodiment_tags(cfg)
-
     # Only patch get_model if user wants custom data_config
     data_config_class = cfg.get("data_config_class", "")
     if not data_config_class:
@@ -174,7 +171,6 @@ def _patch_gr00t_get_model(cfg: dict) -> None:
         from rlinf.models.embodiment.gr00t.gr00t_action_model import GR00T_N1_5_ForRLActionPrediction
         from rlinf.models.embodiment.gr00t.utils import replace_dropout_with_identity
         from rlinf.utils.patcher import Patcher
-
         # Apply RLinf's standard EmbodimentTag patches
         Patcher.clear()
         Patcher.add_patch(
@@ -209,7 +205,6 @@ def _patch_gr00t_get_model(cfg: dict) -> None:
             rl_head_config=model_cfg.rl_head_config,
         )
         model.to(torch_dtype)
-
         if model_cfg.rl_head_config.add_value_head:
             model.action_head.value_head._init_weights()
         if model_cfg.rl_head_config.disable_dropout:
@@ -224,7 +219,6 @@ def _patch_gr00t_get_model(cfg: dict) -> None:
 
 def _register_gr00t_converters(cfg: dict) -> None:
     """Register GR00T obs/action converters for IsaacLab tasks.
-
     Reads obs_converter_type from YAML config (env.train.isaaclab.obs_converter_type).
     """
     from rlinf.models.embodiment.gr00t import simulation_io
@@ -252,13 +246,11 @@ def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
       - task_descriptions: list[str]
     """
     groot_obs = {}
-
     # Load mapping config from YAML or env var
     cfg = _get_isaaclab_cfg()
     gr00t_mapping = cfg.get("gr00t_mapping", {})
     video_mapping = gr00t_mapping.get("video", {})
     state_mapping = gr00t_mapping.get("state", [])
-
     # Convert main_images -> video.xxx
     if "main_images" in env_obs:
         main = env_obs["main_images"]
@@ -266,7 +258,6 @@ def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
         if isinstance(main, torch.Tensor):
             # (B, H, W, C) -> (B, T=1, H, W, C)
             groot_obs[gr00t_key] = main.unsqueeze(1).cpu().numpy()
-
     # Convert extra_view_images -> video.xxx
     if "extra_view_images" in env_obs:
         extra = env_obs["extra_view_images"]  # (B, N, H, W, C)
@@ -276,7 +267,6 @@ def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
                 if i < extra.shape[1]:
                     # (B, H, W, C) -> (B, T=1, H, W, C)
                     groot_obs[key] = extra[:, i].unsqueeze(1).cpu().numpy()
-
     # Convert states -> state.xxx with slicing
     if "states" in env_obs and state_mapping:
         states = env_obs["states"]  # (B, D)
@@ -318,7 +308,6 @@ def _convert_gr00t_to_isaaclab_action(action_chunk: dict, chunk_size: int = 1) -
             mode="constant",
             constant_values=0,
         )
-
     return action_concat
 
 
@@ -398,7 +387,6 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
                 sim_app = AppLauncher(headless=True, enable_cameras=True).app
                 import gymnasium as gym
-
                 from isaaclab_tasks.utils import load_cfg_from_registry
 
                 isaac_env_cfg = load_cfg_from_registry(self.isaaclab_env_id, "env_cfg_entry_point")
@@ -411,7 +399,6 @@ def _create_generic_env_wrapper(task_id: str) -> type:
 
         def _wrap_obs(self, obs):
             """Convert observations to RLinf format.
-
             Output format matches i4h's convention:
               - main_images: (B, H, W, C) - single main camera
               - extra_view_images: (B, N, H, W, C) - stacked extra cameras
@@ -426,7 +413,6 @@ def _create_generic_env_wrapper(task_id: str) -> type:
             camera_obs = obs.get("camera_images", {})
 
             cfg = _get_isaaclab_cfg()
-
             # Get task description from config
             task_desc = cfg.get("task_description", "") or self.task_description
             rlinf_obs = {
@@ -477,12 +463,10 @@ def _create_generic_env_wrapper(task_id: str) -> type:
             """Get image for video logging."""
             camera_obs = obs.get("camera_images", {})
             cfg = _get_isaaclab_cfg()
-
             # Try main_images key, fallback to first available camera
             main_key = cfg.get("main_images")
             if main_key and main_key in camera_obs:
                 return camera_obs[main_key][0].cpu().numpy()
-
             for img in camera_obs.values():
                 return img[0].cpu().numpy()
             return None
