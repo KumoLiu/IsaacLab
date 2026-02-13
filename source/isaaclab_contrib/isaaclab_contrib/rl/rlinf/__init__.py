@@ -25,6 +25,6 @@ The extension module (``extension.py``) is loaded by RLinf via the
 Usage:
     .. code-block:: bash
 
-        export RLINF_EXT_MODULE="isaaclab_rl.rlinf.extension"
+        export RLINF_EXT_MODULE="isaaclab_contrib.rl.rlinf.extension"
         export RLINF_CONFIG_FILE="/path/to/config.yaml"
 """

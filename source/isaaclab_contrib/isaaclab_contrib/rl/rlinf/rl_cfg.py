@@ -21,7 +21,7 @@ Example – Python-first (recommended)
 
 .. code-block:: python
 
-    from isaaclab_rl.rlinf.rl_cfg import RLinfIsaacLabCfg, RLinfStateSpecCfg
+    from isaaclab_contrib.rl.rlinf.rl_cfg import RLinfIsaacLabCfg, RLinfStateSpecCfg
 
 
     class MyTaskCfg(RLinfIsaacLabCfg):

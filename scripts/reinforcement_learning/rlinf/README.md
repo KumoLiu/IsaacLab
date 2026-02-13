@@ -44,12 +44,13 @@ scripts/reinforcement_learning/rlinf/
 └── cli_args.py              # Shared CLI argument definitions
 ```
 
-**Extension module** (in `source/isaaclab_rl/`):
+**Extension module** (in `source/isaaclab_contrib/`):
 
 ```
-source/isaaclab_rl/isaaclab_rl/rlinf/
+source/isaaclab_contrib/isaaclab_contrib/rl/rlinf/
 ├── __init__.py
-└── extension.py             # RLinf extension: task registration, obs/action conversion
+├── extension.py             # RLinf extension: task registration, obs/action conversion
+└── rl_cfg.py                # Configuration dataclasses (RLinfIsaacLabCfg, etc.)
 ```
 
 **Task-specific config** (in `source/isaaclab_tasks/`):
@@ -301,6 +302,6 @@ These are set automatically by `train.py` / `play.py` — you typically do not n
 
 | Variable | Description |
 |---|---|
-| `RLINF_EXT_MODULE` | Extension module path (`isaaclab_rl.rlinf.extension`) |
+| `RLINF_EXT_MODULE` | Extension module path (`isaaclab_contrib.rl.rlinf.extension`) |
 | `RLINF_CONFIG_FILE` | Full path to the Hydra config YAML |
 | `RLINF_ROOT` | (Optional) Override RLinf repo location (defaults to IsaacLab's parent directory) |

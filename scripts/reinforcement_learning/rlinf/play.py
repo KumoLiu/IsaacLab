@@ -46,7 +46,7 @@ if RLINF_ROOT not in os.environ.get("PYTHONPATH", ""):
     os.environ["PYTHONPATH"] = RLINF_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 # required for RLinf to register IsaacLab tasks and converters
-os.environ.setdefault("RLINF_EXT_MODULE", "isaaclab_rl.rlinf.extension")
+os.environ.setdefault("RLINF_EXT_MODULE", "isaaclab_contrib.rl.rlinf.extension")
 
 # local imports
 import cli_args  # noqa: E402  # isort: skip

@@ -10,7 +10,7 @@ but targets the RLinf + GR00T pipeline instead.  All observation/action mapping
 parameters are defined here as a single source of truth.
 """
 
-from isaaclab_rl.rlinf.rl_cfg import (
+from isaaclab_contrib.rl.rlinf.rl_cfg import (
     RLinfActionMappingCfg,
     RLinfGR00TMappingCfg,
     RLinfGR00TStateMappingCfg,

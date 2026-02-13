@@ -287,8 +287,8 @@ large VLA models that don't fit on a single GPU.
 
    .. code:: bash
 
-      # Step 1: Install RLinf dependencies
-      ./isaaclab.sh -i rlinf
+      # Step 1: Install RLinf dependencies (from isaaclab_contrib)
+      pip install -e "source/isaaclab_contrib[rlinf]"
 
       # Step 2: Clone RLinf repo (into the parent directory of IsaacLab)
       cd ..

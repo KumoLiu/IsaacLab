@@ -10,7 +10,7 @@
 """RLinf extension module for IsaacLab tasks.
 
 This module is loaded by RLinf's Worker._load_user_extensions() when
-RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension is set in the environment.
+RLINF_EXT_MODULE=isaaclab_contrib.rl.rlinf.extension is set in the environment.
 
 It registers IsaacLab tasks into RLinf's registries, allowing IsaacLab users
 to train on their tasks without modifying RLinf source code.
@@ -38,7 +38,7 @@ Task IDs are read automatically from ``env.train.init_params.id`` and
 ``env.eval.init_params.id`` in the YAML config.
 
 Usage:
-    export RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension
+    export RLINF_EXT_MODULE=isaaclab_contrib.rl.rlinf.extension
     export RLINF_CONFIG_FILE=/path/to/isaaclab_ppo_gr00t_assemble_trocar.yaml
 """
 
@@ -70,7 +70,7 @@ def register() -> None:
     """Register IsaacLab extensions into RLinf.
 
     This function is called automatically by RLinf's Worker._load_user_extensions()
-    when RLINF_EXT_MODULE=isaaclab_rl.rlinf.extension is set.
+    when RLINF_EXT_MODULE=isaaclab_contrib.rl.rlinf.extension is set.
 
     It performs the following registrations:
     1. Registers GR00T obs/action converters
@@ -83,7 +83,7 @@ def register() -> None:
         return
     _registered = True
 
-    logger.info("isaaclab_rl.rlinf.extension: Registering IsaacLab extensions...")
+    logger.info("isaaclab_contrib.rl.rlinf.extension: Registering IsaacLab extensions...")
 
     # Load config once and pass to all registration functions
     cfg = _get_isaaclab_cfg()
@@ -92,7 +92,7 @@ def register() -> None:
     _patch_gr00t_get_model(cfg)
     _register_isaaclab_envs()
 
-    logger.info("isaaclab_rl.rlinf.extension: Registration complete.")
+    logger.info("isaaclab_contrib.rl.rlinf.extension: Registration complete.")
 
 
 def _load_full_cfg() -> dict:
