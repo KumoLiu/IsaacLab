@@ -33,18 +33,10 @@ Note:
 import argparse
 import logging
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.absolute()
-# TODO: Remove this sys.path / PYTHONPATH hack once rlinf is pip-installable.
-RLINF_ROOT = os.environ.get("RLINF_ROOT", str(SCRIPT_DIR.parents[3]))
-if RLINF_ROOT not in sys.path:
-    sys.path.insert(0, RLINF_ROOT)
-if RLINF_ROOT not in os.environ.get("PYTHONPATH", ""):
-    os.environ["PYTHONPATH"] = RLINF_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")
-
 # required for RLinf to register IsaacLab tasks and converters
 os.environ.setdefault("RLINF_EXT_MODULE", "isaaclab_contrib.rl.rlinf.extension")
 

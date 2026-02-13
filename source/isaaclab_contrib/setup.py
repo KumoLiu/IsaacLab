@@ -18,14 +18,12 @@ EXTENSION_TOML_DATA = toml.load(os.path.join(EXTENSION_PATH, "config", "extensio
 # Extra dependencies for contributed extensions
 EXTRAS_REQUIRE = {
     "rlinf": [
-        # RLinf is loaded via PYTHONPATH (see train.py / play.py bootstrap).
-        #   git clone https://github.com/RLinf/RLinf.git
-        #   git checkout 2036b8d2d98dff902f96dde5418ecc589dd1146d
         # GR00T (Isaac-GR00T) must be installed separately:
         #   git clone https://github.com/NVIDIA/Isaac-GR00T.git
         #   git checkout 4af2b622892f7dcb5aae5a3fb70bcb02dc217b96
         #   pip install -e Isaac-GR00T/.[base] --no-deps
         #   pip install --no-build-isolation flash-attn==2.7.1.post4
+        "rlinf",
         "ray[default]==2.47.0",
         "av==12.3.0",
         "numpydantic==1.7.0",
