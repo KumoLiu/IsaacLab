@@ -33,3 +33,10 @@ Stable-Baselines3 Wrapper
 .. automodule:: isaaclab_rl.sb3
    :members:
    :show-inheritance:
+
+RLinf Extension
+---------------
+
+.. automodule:: isaaclab_rl.rlinf
+   :members:
+   :show-inheritance:
