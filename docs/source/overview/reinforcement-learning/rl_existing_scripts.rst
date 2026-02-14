@@ -277,30 +277,19 @@ Vision-Language-Action (VLA) models such as `GR00T <https://github.com/NVIDIA/Is
 It uses Ray for distributed computing and FSDP for model parallelism, enabling RL training of
 large VLA models that don't fit on a single GPU.
 
-.. note::
-
-   RLinf currently cannot be installed directly via ``pip install``. Users need to clone the
-   RLinf repo and add it to their ``PYTHONPATH``. The ``train.py`` and ``play.py`` scripts
-   handle this automatically by looking for the RLinf repo in the parent directory of IsaacLab.
-
 -  Installation and setup:
 
    .. code:: bash
 
-      # Step 1: Install RLinf dependencies (from isaaclab_contrib)
+      # Step 1: Install RLinf and its dependencies (from isaaclab_contrib)
       pip install -e "source/isaaclab_contrib[rlinf]"
 
-      # Step 2: Clone RLinf repo (into the parent directory of IsaacLab)
-      cd ..
-      git clone https://github.com/RLinf/RLinf.git
-      cd IsaacLab
-
-      # Step 3: Clone and install Isaac-GR00T (for VLA model support)
+      # Step 2: Clone and install Isaac-GR00T (for VLA model support)
       cd scripts/reinforcement_learning/rlinf
       git clone https://github.com/NVIDIA/Isaac-GR00T.git
       pip install -e Isaac-GR00T/.[base] --no-deps
 
-      # Step 4: Install flash-attn (must be built against the correct PyTorch)
+      # Step 3: Install flash-attn (must be built against the correct PyTorch)
       pip install --no-build-isolation flash-attn==2.7.1.post4
 
 -  Training a VLA agent with RLinf:
@@ -314,9 +303,10 @@ large VLA models that don't fit on a single GPU.
       ./isaaclab.sh -p scripts/reinforcement_learning/rlinf/train.py \
           --config_name isaaclab_ppo_gr00t_assemble_trocar
 
-      # Train with custom settings
+      # Train with task override and custom settings
       ./isaaclab.sh -p scripts/reinforcement_learning/rlinf/train.py \
           --config_name isaaclab_ppo_gr00t_assemble_trocar \
+          --task Isaac-Assemble-Trocar-G129-Dex3-RLinf-v0 \
           --num_envs 64 --max_epochs 1000
 
       # List available tasks
@@ -334,9 +324,9 @@ large VLA models that don't fit on a single GPU.
       ./isaaclab.sh -p scripts/reinforcement_learning/rlinf/play.py \
           --model_path /path/to/checkpoint --video
 
-      # Evaluate with specific number of environments
+      # Evaluate with specific number of environments and episodes
       ./isaaclab.sh -p scripts/reinforcement_learning/rlinf/play.py \
-          --model_path /path/to/checkpoint --num_envs 8
+          --model_path /path/to/checkpoint --num_envs 8 --num_episodes 10
 
 
 All the scripts above log the training progress to `Tensorboard`_ in the ``logs`` directory in the root of
