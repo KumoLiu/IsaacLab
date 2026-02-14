@@ -23,7 +23,7 @@ EXTRAS_REQUIRE = {
         #   git checkout 4af2b622892f7dcb5aae5a3fb70bcb02dc217b96
         #   pip install -e Isaac-GR00T/.[base] --no-deps
         #   pip install --no-build-isolation flash-attn==2.7.1.post4
-        "rlinf",
+        "rlinf==0.2.0dev2",
         "ray[default]==2.47.0",
         "av==12.3.0",
         "numpydantic==1.7.0",
