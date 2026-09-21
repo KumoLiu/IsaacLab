@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -48,6 +49,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def run(argv: list[str]) -> None:
     """Launch RLinf evaluation."""
     args_cli = _parse_args(argv)
+    # Keep Ray from uploading the uv project; RLinf selects the worker interpreter.
+    os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
     config_name = args_cli.config_name
     config_dir = cli_args.configure_rlinf_environment(config_name, args_cli.config_path)
 
@@ -56,7 +59,7 @@ def run(argv: list[str]) -> None:
     import torch.multiprocessing as mp
     from hydra import compose, initialize_config_dir
     from hydra.core.global_hydra import GlobalHydra
-    from omegaconf import open_dict
+    from omegaconf import OmegaConf, open_dict
     from rlinf.config import validate_cfg
     from rlinf.runners.embodied_eval_runner import EmbodiedEvalRunner
     from rlinf.scheduler import Cluster
@@ -76,7 +79,7 @@ def run(argv: list[str]) -> None:
     print(f"[INFO] Task: {task_id}")
     # hyphens instead of colons in the time stamp; colons are invalid in Windows paths
     timestamp = datetime.now().strftime("%Y%m%d-%H-%M-%S")
-    log_dir = Path("logs") / "rlinf" / "eval" / f"{timestamp}-{task_id.replace('/', '_')}"
+    log_dir = (Path("logs") / "rlinf" / "eval" / f"{timestamp}-{task_id.replace('/', '_')}").absolute()
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
@@ -102,15 +105,18 @@ def run(argv: list[str]) -> None:
             cfg.env.eval.total_num_envs = args_cli.num_envs
         if args_cli.seed is not None:
             cfg.actor.seed = args_cli.seed
+            cfg.env.eval.seed = args_cli.seed
         if args_cli.num_episodes is not None:
-            cfg.algorithm.eval_rollout_epoch = args_cli.num_episodes
+            # New RLinf reads env.eval; older releases read algorithm. Keep CLI precedence in both.
+            cfg.env.eval.rollout_epoch = args_cli.num_episodes
+            OmegaConf.update(cfg, "algorithm.eval_rollout_epoch", args_cli.num_episodes)
 
     cfg = validate_cfg(cfg)
     fields = {
         "Task": cfg.env.eval.init_params.id,
         "Num envs": cfg.env.eval.total_num_envs,
         "Model": cfg.rollout.model.model_path,
-        "Checkpoint": cfg.runner.eval_policy_path,
+        "Checkpoint": cfg.runner.get("eval_policy_path"),
         "Videos": cfg.env.eval.video_cfg.save_video,
     }
     if cfg.env.eval.video_cfg.save_video:

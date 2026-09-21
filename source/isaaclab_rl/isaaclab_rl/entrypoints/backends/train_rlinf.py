@@ -85,7 +85,7 @@ def run(argv: list[str]) -> None:
     print(f"[INFO] Task: {task_id}")
     # hyphens instead of colons in the time stamp; colons are invalid in Windows paths
     timestamp = datetime.now().strftime("%Y%m%d-%H-%M-%S")
-    log_dir = Path("logs") / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}"
+    log_dir = (Path("logs") / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}").absolute()
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
@@ -99,6 +99,8 @@ def run(argv: list[str]) -> None:
             cfg.env.eval.total_num_envs = args_cli.num_envs
         if args_cli.seed is not None:
             cfg.actor.seed = args_cli.seed
+            cfg.env.train.seed = args_cli.seed
+            cfg.env.eval.seed = args_cli.seed
         if args_cli.max_iterations is not None:
             cfg.runner.max_epochs = args_cli.max_iterations
         if args_cli.model_path is not None:
@@ -139,7 +141,13 @@ def run(argv: list[str]) -> None:
 
         actor_worker_cls = EmbodiedSACFSDPPolicy
     else:
-        from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+        try:
+            from rlinf.workers.actor.embodied_fsdp_actor_worker import EmbodiedFSDPActor
+        except ModuleNotFoundError as exc:
+            # Older RLinf kept this class in fsdp_actor_worker; do not hide missing dependencies.
+            if exc.name != "rlinf.workers.actor.embodied_fsdp_actor_worker":
+                raise
+            from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 
         actor_worker_cls = EmbodiedFSDPActor
     actor_group = actor_worker_cls.create_group(cfg).launch(

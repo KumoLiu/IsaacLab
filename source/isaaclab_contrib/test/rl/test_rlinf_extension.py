@@ -107,10 +107,8 @@ def _build_rlinf_mocks() -> dict[str, types.ModuleType]:
 
 # Install mocks *before* importing the extension module
 _rlinf_mocks = _build_rlinf_mocks()
-sys.modules.update(_rlinf_mocks)
-
-# Now we can safely import the extension
-import isaaclab_contrib.rl.rlinf.extension as ext  # noqa: E402
+with mock.patch.dict(sys.modules, _rlinf_mocks):
+    import isaaclab_contrib.rl.rlinf.extension as ext
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -170,7 +168,8 @@ def _reset_extension_state():
         _MOCK_EMBODIMENT_TAG_MAPPING
     )
     _rlinf_mocks["rlinf.models.embodiment.gr00t.embodiment_tags"].EmbodimentTag = _MockEmbodimentTag
-    yield
+    with mock.patch.dict(sys.modules, _rlinf_mocks):
+        yield
 
 
 @pytest.fixture()
@@ -402,6 +401,49 @@ class TestEmbodimentTagPatching:
 class TestTaskRegistration:
     """Tests for ``_register_isaaclab_envs``."""
 
+    def test_neural_adapter_selected_by_task_config(self, monkeypatch) -> None:
+        """The common extension must not hard-code the trocar adapter."""
+        module = types.ModuleType("example_neural_task")
+        module.Adapter = type("ExampleAdapter", (), {})
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        section = {
+            "init_params": {"id": "Example-Neural-v0"},
+            "isaaclab": {"backend": "neural", "adapter": "example_neural_task:Adapter"},
+        }
+        monkeypatch.setattr(ext, "_full_cfg_cache", {"env": {"train": section, "eval": section}})
+        ext._register_isaaclab_envs()
+        registry = _rlinf_mocks["rlinf.envs.isaaclab"].REGISTER_ISAACLAB_ENVS
+        assert registry["Example-Neural-v0"] is module.Adapter
+
+    @pytest.mark.parametrize("adapter", [None, "missing_module_separator"])
+    def test_neural_adapter_is_required(self, monkeypatch, adapter) -> None:
+        monkeypatch.setattr(
+            ext,
+            "_full_cfg_cache",
+            {
+                "env": {
+                    "train": {
+                        "init_params": {"id": "Example-Neural-v0"},
+                        "isaaclab": {"backend": "neural", "adapter": adapter},
+                    }
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="isaaclab.adapter"):
+            ext._register_isaaclab_envs()
+
+    def test_same_task_conflicting_adapters_fail(self, monkeypatch) -> None:
+        sections = {
+            key: {
+                "init_params": {"id": "Example-Neural-v0"},
+                "isaaclab": {"backend": "neural", "adapter": adapter},
+            }
+            for key, adapter in (("train", "task:First"), ("eval", "task:Second"))
+        }
+        monkeypatch.setattr(ext, "_full_cfg_cache", {"env": sections})
+        with pytest.raises(ValueError, match="disagree"):
+            ext._register_isaaclab_envs()
+
     def test_tasks_registered_from_yaml(self, set_config_env) -> None:
         """Task IDs from train and eval sections should be registered."""
         ext._load_full_cfg()
@@ -450,16 +492,23 @@ class TestTaskRegistration:
 class TestConverterRegistration:
     """Tests for ``_register_gr00t_converters``."""
 
-    def test_converters_registered(self, set_config_env) -> None:
+    @pytest.mark.parametrize("versioned", [False, True])
+    def test_converters_registered(self, set_config_env, monkeypatch, versioned) -> None:
         """Obs and action converters should be added to RLinf's registries."""
+        sim_io = _rlinf_mocks["rlinf.models.embodiment.gr00t.simulation_io"]
+        names = ("ACTION_CONVERSION",)
+        if versioned:
+            monkeypatch.delattr(sim_io, "ACTION_CONVERSION")
+            names = ("ACTION_CONVERSION_N1D5", "ACTION_CONVERSION_N1D6", "ACTION_CONVERSION_N1D7")
+            for name in names:
+                monkeypatch.setattr(sim_io, name, {}, raising=False)
         cfg = ext._SAMPLE_CFG if hasattr(ext, "_SAMPLE_CFG") else {"obs_converter_type": "isaaclab"}
         ext._register_gr00t_converters(cfg)
 
-        sim_io = _rlinf_mocks["rlinf.models.embodiment.gr00t.simulation_io"]
         assert "isaaclab" in sim_io.OBS_CONVERSION
-        assert "isaaclab" in sim_io.ACTION_CONVERSION
         assert sim_io.OBS_CONVERSION["isaaclab"] is ext._convert_isaaclab_obs_to_gr00t
-        assert sim_io.ACTION_CONVERSION["isaaclab"] is ext._convert_gr00t_to_isaaclab_action
+        for name in names:
+            assert getattr(sim_io, name)["isaaclab"] is ext._convert_gr00t_to_isaaclab_action
 
     def test_no_duplicate_converter_registration(self) -> None:
         """Should not overwrite existing converter entries."""
