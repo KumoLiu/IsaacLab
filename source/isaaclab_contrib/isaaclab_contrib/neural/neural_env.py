@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Model-independent, single-environment neural backend for native Isaac Lab.
+"""Model-independent, batched neural backend for native Isaac Lab.
 
 Concrete PhysicsManagers implement four model lifecycle hooks, without another
 Gym environment. They own inference and task reward; Isaac Lab owns episode resets.
@@ -67,12 +67,15 @@ class NeuralPhysicsManager(PhysicsManager):
         cls._pending_action = None
         cls.observation = None
         cls.transition = None
+        cls._ready = np.zeros(sim_context.cfg.physics.num_envs, dtype=bool)
         cls._scene_data = _EmptySceneData(sim_context.cfg.device)
 
     @classmethod
     def validate_env_cfg(cls, cfg: NeuralDirectEnvCfg) -> None:
         """Check declared model spaces and simulated step duration [s] before startup."""
         physics = cfg.sim.physics
+        if type(physics.num_envs) is not int or physics.num_envs < 1 or physics.num_envs != cfg.scene.num_envs:
+            raise ValueError("Backend num_envs must be positive and match scene.num_envs")
         if not math.isclose(physics.step_dt, cfg.sim.dt, rel_tol=1e-9, abs_tol=1e-12):
             raise ValueError("Backend step_dt must match sim.dt [s]")
         if cfg.action_space != physics.action_space or cfg.observation_space != physics.observation_space:
@@ -84,13 +87,13 @@ class NeuralPhysicsManager(PhysicsManager):
         raise NotImplementedError
 
     @classmethod
-    def _reset_model(cls, *, seed: int, options: dict) -> tuple[dict[str, np.ndarray], dict]:
-        """Return initial unbatched observations and metadata."""
+    def _reset_model(cls, *, env_ids: np.ndarray, seed: int, options: dict) -> tuple[dict[str, np.ndarray], dict]:
+        """Reset only selected rows; return observations batched in env_ids order."""
         raise NotImplementedError
 
     @classmethod
-    def _step_model(cls, action: np.ndarray) -> tuple[dict[str, np.ndarray], float, bool, bool, dict]:
-        """Return observation, reward, terminated, truncated, info; never auto-reset."""
+    def _step_model(cls, action: np.ndarray) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, np.ndarray, dict]:
+        """Advance all rows; return batched observations and (N,) reward/done arrays."""
         raise NotImplementedError
 
     @classmethod
@@ -109,32 +112,55 @@ class NeuralPhysicsManager(PhysicsManager):
         cls.dispatch_event(PhysicsEvent.PHYSICS_READY)
 
     @classmethod
-    def reset_episode(cls, *, seed: int, options: dict) -> dict:
-        """Reset model state; simulation-wide time remains monotonic."""
+    def reset_episode(cls, *, seed: int, options: dict, env_ids: np.ndarray | None = None) -> dict:
+        """Reset selected model states without changing other rows or simulation time."""
+        if env_ids is None:
+            env_ids = np.arange(PhysicsManager._cfg.num_envs)
+        env_ids = np.asarray(env_ids)
+        if (
+            env_ids.ndim != 1
+            or env_ids.dtype.kind not in "iu"
+            or not len(env_ids)
+            or len(np.unique(env_ids)) != len(env_ids)
+            or np.any(env_ids < 0)
+            or np.any(env_ids >= PhysicsManager._cfg.num_envs)
+        ):
+            raise ValueError("env_ids must contain distinct valid environment indices")
         cls._pending_action = None
         cls.transition = None
-        cls.observation = None
-        observation, info = cls._reset_model(seed=seed, options=copy.deepcopy(options))
-        cls._store_observation(observation)
+        cls._ready[env_ids] = False
+        observation, info = cls._reset_model(env_ids=env_ids, seed=seed, options=copy.deepcopy(options))
+        cls._store_observation(observation, env_ids)
+        cls._ready[env_ids] = True
         return copy.deepcopy(info)
 
     @classmethod
-    def _store_observation(cls, observation: dict[str, np.ndarray]) -> None:
-        if not PhysicsManager._cfg.observation_space.contains(observation):
+    def _store_observation(cls, observation: dict[str, np.ndarray], env_ids: np.ndarray | None = None) -> None:
+        count = PhysicsManager._cfg.num_envs if env_ids is None else len(env_ids)
+        if not gym.vector.utils.batch_space(PhysicsManager._cfg.observation_space, count).contains(observation):
             raise ValueError("Backend observation does not match its declared space")
-        cls.observation = {
-            key: torch.from_numpy(value.copy()).unsqueeze(0).to(cls.get_device()) for key, value in observation.items()
-        }
+        if cls.observation is None:
+            cls.observation = {
+                key: torch.zeros(
+                    (PhysicsManager._cfg.num_envs, *value.shape[1:]),
+                    dtype=torch.from_numpy(value).dtype,
+                    device=cls.get_device(),
+                )
+                for key, value in observation.items()
+            }
+        indices = slice(None) if env_ids is None else torch.as_tensor(env_ids, device=cls.get_device())
+        for key, value in observation.items():
+            cls.observation[key][indices] = torch.from_numpy(value.copy()).to(cls.get_device())
 
     @classmethod
     def set_action(cls, action: torch.Tensor) -> None:
         """Queue one batched action; units and shape are defined by the adapter."""
-        if cls.observation is None:
+        if cls.observation is None or not cls._ready.all():
             raise RuntimeError("Reset the environment before applying actions")
-        space = PhysicsManager._cfg.action_space
-        if action.shape != (1, *space.shape) or not torch.isfinite(action).all():
-            raise ValueError(f"Expected finite actions with shape {(1, *space.shape)}")
-        array = action[0].detach().cpu().numpy().astype(space.dtype, copy=True)
+        space = gym.vector.utils.batch_space(PhysicsManager._cfg.action_space, PhysicsManager._cfg.num_envs)
+        if action.shape != space.shape or not torch.isfinite(action).all():
+            raise ValueError(f"Expected finite actions with shape {space.shape}")
+        array = action.detach().cpu().numpy().astype(space.dtype, copy=True)
         if not space.contains(array):
             raise ValueError("Action is outside the backend action space")
         if cls._pending_action is not None:
@@ -150,16 +176,23 @@ class NeuralPhysicsManager(PhysicsManager):
         cls._pending_action = None
         cls.observation = None
         cls.transition = None
+        cls._ready[:] = False
         observation, reward, terminated, truncated, info = cls._step_model(action)
-        if np.ndim(reward) != 0 or not np.isfinite(reward):
-            raise ValueError("Backend reward must be a finite scalar")
+        reward = np.asarray(reward, dtype=np.float32)
+        terminated, truncated = np.asarray(terminated), np.asarray(truncated)
+        count = PhysicsManager._cfg.num_envs
+        if reward.shape != (count,) or not np.isfinite(reward).all():
+            raise ValueError("Backend reward must be a finite (num_envs,) array")
+        if any(value.shape != (count,) or value.dtype != bool for value in (terminated, truncated)):
+            raise ValueError("Backend done flags must be boolean (num_envs,) arrays")
         cls._store_observation(observation)
+        cls._ready[:] = True
         cls.transition = {
             **copy.deepcopy(info),
             **{key: value.copy() for key, value in observation.items()},
-            "reward": np.asarray(float(reward)),
-            "terminated": np.asarray(bool(terminated)),
-            "truncated": np.asarray(bool(truncated)),
+            "reward": reward.copy(),
+            "terminated": terminated.copy(),
+            "truncated": truncated.copy(),
         }
         PhysicsManager._sim_time += cls.get_physics_dt()
 
@@ -204,6 +237,7 @@ class NeuralPhysicsCfg(PhysicsCfg):
     action_space: gym.spaces.Box = MISSING
     observation_space: gym.spaces.Dict = MISSING
     step_dt: float = MISSING
+    num_envs: int = 1
 
 
 @configclass
@@ -240,8 +274,8 @@ class NeuralDirectEnv(DirectRLEnv):
             name not in InteractiveSceneCfg.__dataclass_fields__ and value is not None
             for name, value in vars(cfg.scene).items()
         )
-        if type(cfg.scene) is not InteractiveSceneCfg or cfg.scene.num_envs != 1 or has_assets:
-            raise ValueError("Neural backends currently support one empty InteractiveScene, without assets")
+        if type(cfg.scene) is not InteractiveSceneCfg or has_assets:
+            raise ValueError("Neural backends require an empty InteractiveScene, without assets")
         if not issubclass(cfg.sim.physics.class_type, NeuralPhysicsManager):
             raise ValueError("Select a NeuralPhysicsManager backend")
         if cfg.sim.device != "cpu" or cfg.decimation != 1:
@@ -285,22 +319,22 @@ class NeuralDirectEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         transition = self.sim.physics_manager.transition
         self.extras["neural_transition"] = copy.deepcopy(transition)
-        return torch.tensor([float(transition["reward"])], device=self.device)
+        return torch.as_tensor(transition["reward"], device=self.device).clone()
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         transition = self.sim.physics_manager.transition
-        terminated = torch.tensor([bool(transition["terminated"])], device=self.device)
-        truncated = torch.tensor([bool(transition["truncated"])], device=self.device)
+        terminated = torch.as_tensor(transition["terminated"], device=self.device).clone()
+        truncated = torch.as_tensor(transition["truncated"], device=self.device).clone()
         return terminated, truncated | (self.episode_length_buf >= self.max_episode_length)
 
     def _reset_idx(self, env_ids: Sequence[int]) -> None:
         if len(env_ids) == 0:
             return
-        if len(env_ids) != 1 or int(env_ids[0]) != 0:
-            raise ValueError("Only environment index 0 is supported")
         super()._reset_idx(env_ids)
         self.extras["reset_info"] = self.sim.physics_manager.reset_episode(
-            seed=int(torch.initial_seed()), options=self.cfg.reset_options
+            seed=int(torch.initial_seed()),
+            options=self.cfg.reset_options,
+            env_ids=torch.as_tensor(env_ids).cpu().numpy(),
         )
 
     def render(self, recompute: bool = False) -> np.ndarray | None:
