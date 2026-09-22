@@ -1,0 +1,108 @@
+# Final retained WM: scratch rank32 / LR3e-4 / 18k / EMA BF16.
+# Verified against the original run's resolved config and launch_info.yaml.
+# Registered by env_cfg.make_config() outside the upstream DreamDojo checkout.
+# Use a NEW job.name for a new run to avoid resuming the retained experiment.
+defaults:
+  - dreamdojo_2b_480_640_g1
+  - _self_
+
+job:
+  project: dreamdojo
+  group: hf_teleop_rollout_posttrain_lora
+  name: lora_r32_scratch_lr3e-4_18k
+
+checkpoint:
+  save_iter: 500
+  load_path: /localhome/local-yunl/DreamDojo/checkpoints/DreamDojo/2B_G1_post-train/iter_000050000/
+  load_training_state: false
+  strict_resume: false
+
+trainer:
+  max_iter: 18000
+  seed: 0
+  max_val_iter: 100
+  grad_accum_iter: 1
+  logging_iter: 10
+  # Same hold-out guarantee as the full-finetune run: the val sets below are
+  # reserved for independent evaluation and must never be read while training.
+  run_validation: false
+  callbacks:
+    grad_clip:
+      clip_norm: 0.1
+    every_n_sample_reg:
+      every_n: 500
+      fps: 5
+    every_n_sample_ema:
+      every_n: 500
+      fps: 5
+
+# Original optimizer and schedule; 18k does not decay this 400k cycle to zero.
+optimizer:
+  lr: 0.0003
+  optim_type: adamw
+  fused: true
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  weight_decay: 0.1
+
+scheduler:
+  warm_up_steps: [100]
+  cycle_lengths: [400000]
+  f_start: [1.0e-6]
+  f_max: [0.99]
+  f_min: [0.4]
+
+model_parallel:
+  context_parallel_size: 1
+
+model:
+  config:
+    precision: bfloat16
+    fsdp_shard_size: 8
+    ema:
+      enabled: true
+      rate: 0.1
+      iteration_shift: 0
+    use_lora: true
+    lora_rank: 32
+    lora_alpha: 32
+    lora_target_modules: "q_proj,k_proj,v_proj,output_proj,mlp.layer1,mlp.layer2"
+    init_lora_weights: true
+    use_dora: false
+    # MC uses the upstream fixed channel-difference loss with weight 0.1,
+    # identical to the final run. No experimental loss switches are needed.
+    min_num_conditional_frames: 1
+    max_num_conditional_frames: 1
+    state_t: 4
+    net:
+      action_dim: 384
+      temporal_compression_ratio: 4
+      num_action_per_chunk: 12
+      zero_init_action_embedder: false
+
+dataloader_train:
+  batch_size: 4
+  dataset:
+    num_frames: 13
+    dataset_path:
+      - /localhome/local-yunl/DreamDojo/datasets/g1_hf_pick_trocar_teleop_success_train
+      - /localhome/local-yunl/DreamDojo/datasets/g1_hf_pick_trocar_rollouts_30k_train
+      - /localhome/local-yunl/DreamDojo/datasets/g1_hf_pick_trocar_rollouts_10k_train
+    dataset_mixing_weights: [0.34, 0.33, 0.33]
+    data_split: full
+    single_base_index: false
+    deterministic_uniform_sampling: false
+
+# Declared for config completeness only; never iterated because
+# trainer.run_validation is false. Held out for standalone evaluation.
+dataloader_val:
+  batch_size: 1
+  dataset:
+    num_frames: 13
+    dataset_path:
+      - /localhome/local-yunl/DreamDojo/datasets/g1_hf_pick_trocar_teleop_success_val
+      - /localhome/local-yunl/DreamDojo/datasets/g1_hf_pick_trocar_rollouts_30k_val
+      - /localhome/local-yunl/DreamDojo/datasets/g1_hf_pick_trocar_rollouts_10k_val
+    data_split: full
+    single_base_index: false
+    deterministic_uniform_sampling: true

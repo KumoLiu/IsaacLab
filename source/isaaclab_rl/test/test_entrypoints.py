@@ -31,6 +31,7 @@ from isaaclab_rl.entrypoints.simple_agents import create_zero_action_policy
         ("import isaaclab_rl", ["isaaclab_rl.entrypoints", "torch"]),
         ("import isaaclab_rl.entrypoints", ["isaaclab_rl.entrypoints.multigpu", "torch"]),
         ("import isaaclab_rl.entrypoints.backends", ["torch"]),
+        ("import isaaclab_rl.entrypoints.backends.play_rlinf", ["rlinf", "ray"]),
         # the LEAPP runtime must only load once the simulation has launched
         ("import isaaclab_rl.entrypoints.backends.export_rsl_rl", ["leapp", "isaaclab.utils.leapp"]),
         ("import isaaclab_rl.rl_games", ["isaaclab_rl.rl_games.rl_games", "rl_games", "torch"]),
@@ -456,6 +457,14 @@ def test_rlinf_rejects_pretrained_checkpoint() -> None:
 
     with pytest.raises(ValueError, match="Pre-trained checkpoints are not available for RLinf"):
         resolve_rlinf_checkpoint("pretrained", log_root_path="logs/rlinf", task="Isaac-Task", config_name="ppo")
+
+
+def test_rlinf_explicit_config_dir_is_absolute(tmp_path, monkeypatch) -> None:
+    """Relative CLI config paths must be valid for Hydra's initialize_config_dir."""
+    from isaaclab_rl.entrypoints.backends.cli_args_rlinf import resolve_config_dir
+
+    monkeypatch.chdir(tmp_path)
+    assert resolve_config_dir("ppo", "configs") == str(tmp_path / "configs")
 
 
 def test_run_backend_restores_sys_argv_after_training(monkeypatch) -> None:

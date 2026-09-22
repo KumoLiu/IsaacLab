@@ -69,7 +69,7 @@ def resolve_config_dir(config_name: str, explicit_path: str | None) -> str:
     3. The directory containing the RLinf entrypoint implementation.
     """
     if explicit_path is not None:
-        return explicit_path
+        return str(Path(explicit_path).absolute())
     spec = importlib.util.find_spec("isaaclab_tasks")
     if spec is not None and spec.origin is not None:
         matches = list(Path(spec.origin).parent.rglob(f"{config_name}.yaml"))

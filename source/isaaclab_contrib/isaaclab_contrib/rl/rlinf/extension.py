@@ -41,6 +41,7 @@ Usage:
 from __future__ import annotations
 
 import collections.abc
+import importlib
 import logging
 import os
 from enum import Enum
@@ -50,7 +51,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 import yaml
-from rlinf.models.embodiment.gr00t import embodiment_tags
 
 if TYPE_CHECKING:
     import torch
@@ -69,25 +69,27 @@ def register() -> None:
     This function is called automatically by RLinf's Worker._load_user_extensions()
     when RLINF_EXT_MODULE=isaaclab_contrib.rl.rlinf.extension is set.
 
-    It performs the following registrations:
-    1. Registers GR00T obs/action converters
-    2. Registers GR00T data config
-    3. Patches GR00T get_model for custom embodiment
-    4. Registers task IDs from YAML config (env.*.init_params.id) into REGISTER_ISAACLAB_ENVS
+    Registers task IDs into REGISTER_ISAACLAB_ENVS, selecting the optional
+    neural adapter when ``env.*.isaaclab.backend`` is ``neural``. Physical
+    tasks retain the existing custom GR00T converters and optional N1.5 loader;
+    neural tasks keep the policy implementation native to RLinf.
     """
     global _registered
     if _registered:
         return
-    _registered = True
 
     logger.info("isaaclab_contrib.rl.rlinf.extension: Registering IsaacLab extensions...")
 
     # Load config once and pass to all registration functions
     cfg = _get_isaaclab_cfg()
 
-    _register_gr00t_converters(cfg)
-    _patch_gr00t_get_model(cfg)
+    # Neural tasks use the policy's native RLinf implementation, not the legacy
+    # N1.5 loader or task-specific converters below.
+    if cfg.get("backend") != "neural":
+        _register_gr00t_converters(cfg)
+        _patch_gr00t_get_model(cfg)
     _register_isaaclab_envs()
+    _registered = True
 
     logger.info("isaaclab_contrib.rl.rlinf.extension: Registration complete.")
 
@@ -131,6 +133,8 @@ def _patch_embodiment_tags(cfg: dict) -> None:
     Args:
         cfg: The IsaacLab-specific configuration dictionary (``env.train.isaaclab``).
     """
+    from rlinf.models.embodiment.gr00t import embodiment_tags
+
     # GR00T uses embodiment tags to identify different robots.  Custom robots
     # (like G129+Dex3) need a unique tag string and numeric ID so that the
     # model's tokenizer can map them to the correct action/state dimensions.
@@ -284,9 +288,12 @@ def _register_gr00t_converters(cfg: dict) -> None:
         simulation_io.OBS_CONVERSION[obs_converter_type] = _convert_isaaclab_obs_to_gr00t
         logger.info(f"Registered obs converter: {obs_converter_type}")
 
-    if obs_converter_type not in simulation_io.ACTION_CONVERSION:
-        simulation_io.ACTION_CONVERSION[obs_converter_type] = _convert_gr00t_to_isaaclab_action
-        logger.info(f"Registered action converter: {obs_converter_type}")
+    # Older RLinf has one registry; newer releases split it by GR00T version.
+    for name in ("ACTION_CONVERSION", "ACTION_CONVERSION_N1D5", "ACTION_CONVERSION_N1D6", "ACTION_CONVERSION_N1D7"):
+        registry = getattr(simulation_io, name, None)
+        if registry is not None and obs_converter_type not in registry:
+            registry[obs_converter_type] = _convert_gr00t_to_isaaclab_action
+            logger.info(f"Registered action converter: {obs_converter_type} in {name}")
 
 
 def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
@@ -393,11 +400,20 @@ def _register_isaaclab_envs() -> None:
     # Collect unique task IDs from the YAML config (train + eval)
     full_cfg = _load_full_cfg()
     env_cfg = full_cfg.get("env", {})
-    task_ids: list[str] = []
+    task_ids: dict[str, tuple[str, str | None]] = {}
     for section in ("train", "eval"):
-        tid = env_cfg.get(section, {}).get("init_params", {}).get("id", "")
-        if tid and tid not in task_ids:
-            task_ids.append(tid)
+        section_cfg = env_cfg.get(section, {})
+        tid = section_cfg.get("init_params", {}).get("id", "")
+        backend = section_cfg.get("isaaclab", {}).get("backend", "physics")
+        adapter = section_cfg.get("isaaclab", {}).get("adapter")
+        if backend not in ("physics", "neural"):
+            raise ValueError(f"Unsupported IsaacLab backend: {backend}")
+        if tid:
+            if tid in task_ids and task_ids[tid] != (backend, adapter):
+                raise ValueError(f"Train/eval disagree on backend/adapter for {tid}")
+            if backend == "neural" and (not isinstance(adapter, str) or ":" not in adapter):
+                raise ValueError("Neural tasks must specify isaaclab.adapter as module:class")
+            task_ids[tid] = (backend, adapter)
 
     if not task_ids:
         logger.warning("No task IDs found in YAML config (env.*.init_params.id)")
@@ -405,13 +421,20 @@ def _register_isaaclab_envs() -> None:
 
     logger.info(f"Tasks to register: {task_ids}")
 
-    for task_id in task_ids:
+    for task_id, (backend, adapter) in task_ids.items():
         if task_id in REGISTER_ISAACLAB_ENVS:
             logger.debug(f"Task '{task_id}' already registered, skipping")
             continue
 
         # Create a generic wrapper class for this task
-        env_class = _create_generic_env_wrapper(task_id)
+        if backend == "neural":
+            module_name, class_name = adapter.split(":", 1)
+            env_class = getattr(importlib.import_module(module_name), class_name)
+            register_converters = getattr(env_class, "register_policy_converters", None)
+            if register_converters is not None:
+                register_converters()
+        else:
+            env_class = _create_generic_env_wrapper(task_id)
         REGISTER_ISAACLAB_ENVS[task_id] = env_class
         logger.info(f"Registered IsaacLab task '{task_id}' for RLinf")
 
