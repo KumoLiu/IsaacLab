@@ -1,4 +1,4 @@
-# Neural simulation in Isaac Lab
+# Online RL with world model as simulator
 
 Use a **world model (WM) to generate the next observation** instead of running
 rigid-body physics. Isaac Lab still manages environment steps and episode resets.
