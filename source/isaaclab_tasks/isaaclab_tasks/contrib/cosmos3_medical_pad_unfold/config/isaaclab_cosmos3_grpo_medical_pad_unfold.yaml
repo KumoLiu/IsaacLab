@@ -38,7 +38,7 @@ env:
       embodiment_tag: new_embodiment
       reset_manifest: null  # Bundled training/validation resets; extend for task evaluation.
       split: train
-      codec_resources: null  # Bundled FK-only URDF and matching normalization statistics.
+      codec_resources: null  # Bundled FK-only URDF; normalization comes from Cosmos Framework.
       world_model:
         checkpoint_path: .pretrained_checkpoints/medical_pad_unfold/world_model
         output_dir: ${runner.logger.log_path}/cosmos3

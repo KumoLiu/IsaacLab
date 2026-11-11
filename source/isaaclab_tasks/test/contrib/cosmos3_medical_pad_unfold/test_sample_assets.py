@@ -43,9 +43,8 @@ def test_bundled_fk_needs_no_meshes_or_external_resources():
     assert not ET.parse(urdf).getroot().findall(".//mesh")
     codec = h2_action_codec.H2UnifiedCodec(urdf, hashlib.sha256(urdf.read_bytes()).hexdigest())
     state = np.array(json.loads((assets / "resets.json").read_text())[1]["state"])
-    controls = codec.for_inference(
+    controls = codec.raw59(
         np.repeat(state[None], 16, axis=0),
         observed_start_joints=state,
-        global_stats_path=assets / "resources/global_asinh.json",
     )
-    assert controls.shape == (16, 64) and np.isfinite(controls).all()
+    assert controls.shape == (16, 59) and np.isfinite(controls).all()

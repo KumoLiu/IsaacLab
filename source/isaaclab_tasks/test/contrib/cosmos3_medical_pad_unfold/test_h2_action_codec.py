@@ -52,18 +52,24 @@ def test_explicit_anchor_and_wrist_local_fingertips(codec, anchor_angle):
     assert not raw[:, np.r_[0:12, 33:37, 58]].any()
 
 
-def test_normalization_padding_and_resource_integrity(codec, tmp_path, monkeypatch):
+@pytest.mark.parametrize("packaged", [False, True])
+def test_normalization_padding_and_resource_integrity(codec, tmp_path, monkeypatch, packaged):
     stats = tmp_path / "global_asinh.json"
+    if packaged:
+        stats = tmp_path / "data/generator/action/normalizers/global_asinh_v1_backward_anchored_gripper_metric.json"
+        stats.parent.mkdir(parents=True)
+        monkeypatch.setattr(module, "files", lambda name: tmp_path, raising=False)
+    kwargs = {} if packaged else {"global_stats_path": stats}
     stats.write_text(json.dumps({"global": {"q01": [-1] * 59, "q99": [1] * 59}}))
     monkeypatch.setattr(module, "STATS_SHA256", hashlib.sha256(stats.read_bytes()).hexdigest())
-    actions = codec.for_inference(np.zeros((16, 58)), observed_start_joints=np.zeros(58), global_stats_path=stats)
+    actions = codec.for_inference(np.zeros((16, 58)), observed_start_joints=np.zeros(58), **kwargs)
     assert actions.shape == (16, 64) and actions.dtype == np.float32
     np.testing.assert_array_equal(actions[:, 12:18], np.tile([1, 0, 0, 0, 1, 0], (16, 1)))
     np.testing.assert_allclose(actions[:, 19], np.arcsinh(0.01) / np.arcsinh(1))
     assert not actions[:, np.r_[0:9, 33, 58:64]].any()
     stats.write_text("{}")
     with pytest.raises(ValueError, match="digest"):
-        codec.for_inference(np.zeros((16, 58)), observed_start_joints=np.zeros(58), global_stats_path=stats)
+        codec.for_inference(np.zeros((16, 58)), observed_start_joints=np.zeros(58), **kwargs)
 
 
 def test_invalid_joint_commands_are_rejected(codec):

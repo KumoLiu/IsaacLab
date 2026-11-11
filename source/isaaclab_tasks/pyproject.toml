@@ -44,6 +44,5 @@ include = ["isaaclab_tasks", "isaaclab_tasks.*"]
     "assets/*.json",
     "assets/*.yaml",
     "assets/*.png",
-    "assets/resources/*.json",
     "assets/resources/*.urdf",
 ]

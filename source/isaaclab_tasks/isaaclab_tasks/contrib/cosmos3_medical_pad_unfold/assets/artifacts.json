@@ -3,9 +3,9 @@
   "artifacts": {
     "world_model": {
       "description": "Medical-pad unified-v1 Stage0 EMA checkpoint, step 1500",
-      "repo_id": null,
-      "revision": null,
-      "prefix": "",
+      "repo_id": "nvidia/s2r_models_dev",
+      "revision": "6abaa3c7292417b8d0064c9b3992dc15365d5c50",
+      "prefix": "yunl/rl/world_models/cosmos3-medpad-1500",
       "files": [
         "config.json",
         "model.safetensors.index.json",
@@ -30,9 +30,9 @@
     },
     "classifier": {
       "description": "Medical-pad v5 five-class ResNet18 classifier, ordered rewards [-2,-1,0,1,2]",
-      "repo_id": null,
-      "revision": null,
-      "prefix": "",
+      "repo_id": "nvidia/s2r_models_dev",
+      "revision": "6abaa3c7292417b8d0064c9b3992dc15365d5c50",
+      "prefix": "yunl/rl/classifiers/medpad-v5",
       "files": [
         "reward_model.pt"
       ],

@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
+from importlib.resources import files
 from pathlib import Path
 
 import numpy as np
@@ -128,8 +129,15 @@ class _H2FK:
         return np.stack(wrists, axis=1), np.stack(tips, axis=1)
 
 
-def _load_stats(path):
-    data = Path(path).read_bytes()
+def _load_stats(path=None):
+    if path is None:
+        data = (
+            files("cosmos_framework")
+            .joinpath("data/generator/action/normalizers/global_asinh_v1_backward_anchored_gripper_metric.json")
+            .read_bytes()
+        )
+    else:
+        data = Path(path).read_bytes()
     if hashlib.sha256(data).hexdigest() != STATS_SHA256:
         raise ValueError("Official normalization statistics digest mismatch")
     stats = json.loads(data)["global"]
@@ -223,7 +231,7 @@ class H2UnifiedCodec:
         return _raw_window(anchor[0], wrists, tips)
 
     def for_inference(
-        self, commands: np.ndarray, *, observed_start_joints: np.ndarray, global_stats_path: str | Path
+        self, commands: np.ndarray, *, observed_start_joints: np.ndarray, global_stats_path: str | Path | None = None
     ) -> np.ndarray:
         """Return normalized float32 actions with shape (16,64); inactive fields are zero."""
         # Deliberately no previous-command fallback. Live inference must supply

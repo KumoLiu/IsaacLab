@@ -102,7 +102,6 @@ class Cosmos3MedicalPadUnfoldTask:
         resources = Path(task.get("codec_resources") or assets / "resources")
         urdf = resources / "H2_with_sharpa_hands.urdf"
         self.codec = H2UnifiedCodec(urdf, hashlib.sha256(urdf.read_bytes()).hexdigest())
-        self.stats = resources / "global_asinh.json"
         reward = task["reward"]
         self.reward_device = torch.device(reward.get("device", "cuda"))
         classifier_config = reward.get("config_file") or assets / "classifier.yaml"
@@ -246,9 +245,7 @@ class Cosmos3MedicalPadUnfoldTask:
         was_inactive = self.inactive.copy()
         controls = np.stack(
             [
-                self.codec.for_inference(action, observed_start_joints=self.states[i], global_stats_path=self.stats)[
-                    :, :59
-                ]
+                self.codec.for_inference(action, observed_start_joints=self.states[i])[:, :59]
                 for i, action in enumerate(actions)
             ]
         )
