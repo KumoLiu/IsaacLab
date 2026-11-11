@@ -30,6 +30,13 @@ It uses the Taxim model from [Si et al., 2022](https://arxiv.org/abs/2109.04027)
 
 See the [TacSL Tactile Sensor](#tacsl-tactile-sensor-detailed) section below for detailed documentation.
 
+### Neural Simulator Backends
+
+Learned dynamics through Isaac Lab's native `SimulationContext` and
+`DirectRLEnv` lifecycle. The [neural simulator guide](neural-simulator.md)
+covers the interface, a minimal backend implementation, and the Cosmos3 example's
+setup, recorded-action replay and policy train/play commands.
+
 ## Extension Structure
 
 The extension follows Isaac Lab's standard package structure:
@@ -59,6 +66,19 @@ from isaaclab_contrib.actuators import Thruster, ThrusterCfg
 from isaaclab_contrib.mdp.actions import ThrustActionCfg
 from isaaclab_contrib.sensors import VisuoTactileSensor, VisuoTactileSensorCfg
 ```
+
+Install the optional Cosmos3 runtime dependencies and inspect the replay demo:
+
+```bash
+uv sync --extra cosmos3
+uv run --extra cosmos3 isaaclab -p scripts/demos/cosmos3_replay.py --help
+```
+
+The extra installs the pinned official Framework in the checkout's `.venv`.
+For the GR00T 1.7/RLinf reference task, use `uv sync --extra cosmos3-rl` instead;
+this also installs the pinned official policy SDK and trainer. Policy, world-model,
+and classifier weights are supplied separately; reset/action/kinematics samples
+are included with the task.
 
 ---
 

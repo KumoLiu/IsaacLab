@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +48,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def run(argv: list[str]) -> None:
     """Launch RLinf evaluation."""
+    os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
     args_cli = _parse_args(argv)
     config_name = args_cli.config_name
     config_dir = cli_args.configure_rlinf_environment(config_name, args_cli.config_path)
@@ -77,6 +79,7 @@ def run(argv: list[str]) -> None:
     # hyphens instead of colons in the time stamp; colons are invalid in Windows paths
     timestamp = datetime.now().strftime("%Y%m%d-%H-%M-%S")
     log_dir = Path("logs") / "rlinf" / "eval" / f"{timestamp}-{task_id.replace('/', '_')}"
+    log_dir = log_dir.resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
@@ -86,7 +89,7 @@ def run(argv: list[str]) -> None:
         if args_cli.model_path:
             cfg.rollout.model.model_path = args_cli.model_path
         if args_cli.checkpoint:
-            cfg.runner.eval_policy_path = cli_args.resolve_rlinf_checkpoint(
+            cfg.runner.ckpt_path = cli_args.resolve_rlinf_checkpoint(
                 args_cli.checkpoint,
                 log_root_path=str(Path("logs") / "rlinf"),
                 task=args_cli.task or task_id,
@@ -103,14 +106,14 @@ def run(argv: list[str]) -> None:
         if args_cli.seed is not None:
             cfg.actor.seed = args_cli.seed
         if args_cli.num_episodes is not None:
-            cfg.algorithm.eval_rollout_epoch = args_cli.num_episodes
+            cfg.env.eval.rollout_epoch = args_cli.num_episodes
 
     cfg = validate_cfg(cfg)
     fields = {
         "Task": cfg.env.eval.init_params.id,
         "Num envs": cfg.env.eval.total_num_envs,
         "Model": cfg.rollout.model.model_path,
-        "Checkpoint": cfg.runner.eval_policy_path,
+        "Checkpoint": cfg.runner.get("ckpt_path"),
         "Videos": cfg.env.eval.video_cfg.save_video,
     }
     if cfg.env.eval.video_cfg.save_video:

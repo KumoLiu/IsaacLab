@@ -34,7 +34,9 @@ def _list_tasks() -> None:
     print(f"\n{rule}\nAvailable RLinf Tasks\n{rule}\n\n[RLinf Registered Tasks]")
     try:
         # rlinf reads RLINF_EXT_MODULE at import time and is only needed for the listing
-        from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
+        from isaaclab_contrib.rl.rlinf.extension import _isaaclab_registry
+
+        REGISTER_ISAACLAB_ENVS = _isaaclab_registry().REGISTER_ISAACLAB_ENVS
     except ImportError:
         print("  (Could not import RLinf registry)")
     else:
@@ -86,6 +88,7 @@ def run(argv: list[str]) -> None:
     # hyphens instead of colons in the time stamp; colons are invalid in Windows paths
     timestamp = datetime.now().strftime("%Y%m%d-%H-%M-%S")
     log_dir = Path("logs") / "rlinf" / f"{timestamp}-{task_id.replace('/', '_')}"
+    log_dir = log_dir.resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Logging to: {log_dir}")
 
@@ -113,7 +116,7 @@ def run(argv: list[str]) -> None:
                 task=args_cli.task or task_id,
                 config_name=config_name,
             )
-            cfg.runner.resume_dir = str(Path(checkpoint_path).parent)
+            cfg.runner.resume_dir = cli_args.resolve_rlinf_resume_dir(checkpoint_path)
 
     write_run_manifest(
         str(log_dir), library="rlinf", task=args_cli.task or task_id, metadata={"config_name": config_name}
@@ -139,7 +142,12 @@ def run(argv: list[str]) -> None:
 
         actor_worker_cls = EmbodiedSACFSDPPolicy
     else:
-        from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+        import importlib.util
+
+        if importlib.util.find_spec("rlinf.workers.actor.embodied_fsdp_actor_worker") is not None:
+            from rlinf.workers.actor.embodied_fsdp_actor_worker import EmbodiedFSDPActor
+        else:
+            from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 
         actor_worker_cls = EmbodiedFSDPActor
     actor_group = actor_worker_cls.create_group(cfg).launch(

@@ -116,7 +116,13 @@ def resolve_rlinf_checkpoint(checkpoint: str, *, log_root_path: str, task: str, 
         )
     checkpoint_path = Path(checkpoint)
     if checkpoint_path.is_dir():
-        checkpoint_path = checkpoint_path / "full_weights.pt"
+        candidates = (
+            checkpoint_path / "full_weights.pt",
+            checkpoint_path / "model_state_dict" / "full_weights.pt",
+            checkpoint_path / "actor" / "model_state_dict" / "full_weights.pt",
+            checkpoint_path / "actor" / "full_weights.pt",
+        )
+        checkpoint_path = next((path for path in candidates if path.is_file()), candidates[0])
     return str(checkpoint_path)
 
 
@@ -127,3 +133,10 @@ def print_rlinf_banner(title: str, fields: dict[str, object]) -> None:
     for name, value in fields.items():
         print(f"  {name}: {value}")
     print(f"{rule}\n")
+
+
+def resolve_rlinf_resume_dir(checkpoint_path: str) -> str:
+    """Return the runner checkpoint root, which contains its actor subdirectory."""
+    parent = Path(checkpoint_path).parent
+    actor_dir = parent.parent if parent.name == "model_state_dict" else parent
+    return str(actor_dir.parent if actor_dir.name == "actor" else parent)

@@ -110,7 +110,7 @@ def test_wheel_builder_includes_isaacsim_extra(source_checkout_root: Path, tmp_p
 
 
 def test_wheel_builder_omits_integrations_without_published_wheels(source_checkout_root: Path, tmp_path):
-    """Git-only RL-Games and Robomimic requirements must stay out of published metadata."""
+    """Git-only integrations must stay out of published PyPI metadata."""
     with (source_checkout_root / "pyproject.toml").open("rb") as f:
         source_project = tomllib.load(f)["project"]
     generated_project = _generate_wheel_pyproject(source_checkout_root, tmp_path)["project"]
@@ -118,14 +118,21 @@ def test_wheel_builder_omits_integrations_without_published_wheels(source_checko
     # Source checkouts retain the integrations through their Git requirements.
     assert any(dep.startswith("rl-games @ git+") for dep in source_project["optional-dependencies"]["rl-games"])
     assert any(dep.startswith("robomimic @ git+") for dep in source_project["optional-dependencies"]["mimic"])
+    assert any(
+        dep.startswith("cosmos-framework @ git+")
+        for dep in source_project["optional-dependencies"]["cosmos3"]
+    )
 
     # The published wheel cannot expose the RL-Games extra or reference either Git-only distribution.
     assert "rl-games" not in generated_project["optional-dependencies"]
+    assert "cosmos3" not in generated_project["optional-dependencies"]
+    assert "cosmos3-rl" not in generated_project["optional-dependencies"]
     generated_requirements = generated_project["dependencies"] + [
         dep for requirements in generated_project["optional-dependencies"].values() for dep in requirements
     ]
     assert not any(dep.startswith("rl-games") for dep in generated_requirements)
     assert not any(dep.startswith("robomimic") for dep in generated_requirements)
+    assert not any(dep.startswith("cosmos-framework") for dep in generated_requirements)
 
 
 def test_wheel_builder_keeps_standalone_importers_explicit(source_checkout_root: Path, tmp_path):

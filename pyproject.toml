@@ -49,7 +49,8 @@ dependencies = [
     "gymnasium>=1.2.0",
     "trimesh>=4.6.8",  # lower bound inherited from newton[importers]
     "pyglet>=2.1.6,<3",
-    "transformers==5.10.4",
+    # Cosmos requires Transformers 4; the policy SDK pins 4.57.3.
+    "transformers>=4.57.3,<6",
     "einops",
     "warp-lang==1.17.0",
     "matplotlib>=3.10.3",
@@ -205,6 +206,19 @@ rlinf = [
     "timm>=1.0.14",
     "peft>=0.17.0",
     "pandas",
+]
+# Optional learned-dynamics backend. uv owns the source checkout and all runtime
+# dependencies; no external source directory or manual --no-deps install is needed.
+cosmos3 = [
+    "cosmos-framework @ git+https://github.com/NVIDIA/cosmos-framework.git@3a84cd3b67f60520f523e184fa7b82011bc75cb4 ; sys_platform == 'linux'",
+    "uv==0.11.29",
+]
+# Simulator + official GR00T 1.7/RLinf FSDP stack, pinned independently of the
+# simulator-only extra. Model checkpoints are supplied separately from task samples.
+cosmos3-rl = [
+    "isaaclab-dev[cosmos3,rlinf]",
+    "rlinf @ git+https://github.com/RLinf/RLinf.git@v0.4 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "gr00t @ git+https://github.com/NVIDIA/Isaac-GR00T.git@3b49067943eb1ab2eb2203b93d461c4390c78da3 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 leapp = [
     "leapp==0.6.1",
@@ -391,6 +405,30 @@ explicit = true
 [tool.uv]
 index-strategy = "unsafe-best-match"
 prerelease = "allow"
+# Reuse Isaac Lab/Cosmos runtime libraries instead of GR00T's older exact pins.
+# This GRPO profile omits standalone SFT, cloud/dev tools and optional kernels.
+exclude-dependencies = [
+    # This frontend uses Cosmos argument annotations, not Tyro's CLI type resolver.
+    { package = { name = "tyro", version = "1.0.17" }, dependencies = ["typeguard"] },
+    # Inference omits training-side file I/O and standalone attention/download backends.
+    { package = { name = "cosmos-framework", version = "1.2.2" }, dependencies = [
+        "nvidia-cudnn-frontend", "obstore", "iopath",
+    ] },
+    { package = { name = "gr00t", version = "0.1.0" }, dependencies = [
+        # Requested by the base environment or the Cosmos/rlinf extras.
+        "diffusers", "gitpython", "matplotlib", "scipy", "click", "einops", "msgpack",
+        "termcolor", "omegaconf", "gymnasium", "pandas", "peft", "tyro",
+        "opencv-python-headless", "albumentations", "huggingface-hub", "triton",
+        # Standalone training, policy serving and optional deployment backends.
+        "datasets", "wandb", "lmdb", "msgpack-numpy", "pyzmq", "jsonlines",
+        "deepspeed", "flash-attn", "torchcodec", "tensorrt-cu12", "tensorrt-cu13",
+        "tensorrt-cu12-libs", "tensorrt-cu13-libs",
+    ] },
+    { package = { name = "rlinf", version = "0.4.0" }, dependencies = [
+        "swanlab", "wandb", "gsutil", "pre-commit", "ruff", "debugpy", "nvitop", "pybind11",
+        "ninja", "pip", "icmplib", "liger-kernel", "datasets", "torchdata", "lz4",
+    ] },
+]
 # Platforms Isaac Lab supports (docs/source/setup/installation/index.rst and the
 # install CI matrix): Ubuntu 22.04 x86_64, Linux aarch64 (DGX Spark / Jetson), and
 # Windows 11 x86_64. Restricting the resolution universe keeps macOS and other

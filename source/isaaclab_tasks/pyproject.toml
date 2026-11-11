@@ -39,3 +39,11 @@ include = ["isaaclab_tasks", "isaaclab_tasks.*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.pyi"]
+"isaaclab_tasks.contrib.cosmos3_medical_pad_unfold" = [
+    "agents/*.yaml",
+    "assets/*.json",
+    "assets/*.yaml",
+    "assets/*.png",
+    "assets/resources/*.json",
+    "assets/resources/*.urdf",
+]
