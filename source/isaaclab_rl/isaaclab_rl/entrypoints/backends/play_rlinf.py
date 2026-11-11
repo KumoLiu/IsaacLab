@@ -107,6 +107,8 @@ def run(argv: list[str]) -> None:
             cfg.actor.seed = args_cli.seed
         if args_cli.num_episodes is not None:
             cfg.env.eval.rollout_epoch = args_cli.num_episodes
+            if "eval_rollout_epoch" in cfg.algorithm:
+                cfg.algorithm.eval_rollout_epoch = args_cli.num_episodes
 
     cfg = validate_cfg(cfg)
     fields = {

@@ -135,7 +135,9 @@ def main() -> None:
     (models / "asset_status.json").write_text(json.dumps(status, indent=2) + "\n")
     print(json.dumps(status, indent=2))
     if missing:
-        parser.exit(1, "Missing model files. Place the files listed in assets/artifacts.json in the model directories.\n")
+        parser.exit(
+            1, "Missing model files. Place the files listed in assets/artifacts.json in the model directories.\n"
+        )
     if args.replay_only:
         print("Replay assets ready. Run scripts/demos/cosmos3_replay.py with the prepared world model.")
     else:

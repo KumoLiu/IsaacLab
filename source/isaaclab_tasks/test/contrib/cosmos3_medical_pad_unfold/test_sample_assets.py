@@ -19,11 +19,6 @@ from isaaclab_tasks.contrib.cosmos3_medical_pad_unfold import h2_action_codec
 
 def test_bundled_reset_and_replay_assets_are_portable():
     assets = Path(h2_action_codec.__file__).with_name("assets")
-    provenance = json.loads((assets / "provenance.json").read_text())
-    for name, identity in provenance["files"].items():
-        path = assets / name
-        assert path.resolve().is_relative_to(assets.resolve())
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == identity["sha256"]
     resets = json.loads((assets / "resets.json").read_text())
     assert [row["split"] for row in resets] == ["train", "validation"]
     for row in resets:

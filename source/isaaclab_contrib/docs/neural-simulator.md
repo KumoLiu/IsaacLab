@@ -8,10 +8,10 @@ conditions. The [Cosmos3 medical-pad example](#cosmos3-example-medical-pad-unfol
 below covers setup, replay and policy training.
 
 ```mermaid
-flowchart LR
-    P["Policy / trainer"] <--> T["Task: actions, rewards, initial conditions"]
-    T <--> E["Isaac Lab environment"]
-    E <--> B["Neural simulator backend"]
+flowchart TB
+    P["Policy / trainer"] <--> T["Task"]
+    T <--> E["Isaac Lab"]
+    E <--> B["Neural backend"]
 ```
 
 ## Backend contract
@@ -76,8 +76,8 @@ uv run --frozen --extra test python -m pytest \
 The [bundled data](../../isaaclab_tasks/isaaclab_tasks/contrib/cosmos3_medical_pad_unfold/assets)
 contains one training reset, one validation reset and 64 recorded actions.
 The robot description is used to convert joint targets to world-model controls;
-mesh files are not required. [provenance.json](../../isaaclab_tasks/isaaclab_tasks/contrib/cosmos3_medical_pad_unfold/assets/provenance.json)
-records the sample origins.
+mesh files are not required. The shared `global_asinh.json` statistics normalize
+the robot controls to the scale expected by the world model.
 
 ### 2. Replay recorded actions
 

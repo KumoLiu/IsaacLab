@@ -458,7 +458,8 @@ def test_rlinf_rejects_pretrained_checkpoint() -> None:
         resolve_rlinf_checkpoint("pretrained", log_root_path="logs/rlinf", task="Isaac-Task", config_name="ppo")
 
 
-def test_rlinf_play_forwards_checkpoint_to_rollout_worker(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("legacy_eval", [False, True])
+def test_rlinf_play_forwards_checkpoint_to_rollout_worker(monkeypatch, tmp_path, legacy_eval: bool) -> None:
     """Playback must fill the checkpoint field consumed by RLinf's HF worker."""
     from omegaconf import OmegaConf
 
@@ -469,6 +470,7 @@ def test_rlinf_play_forwards_checkpoint_to_rollout_worker(monkeypatch, tmp_path)
     cfg = OmegaConf.create(
         {
             "env": {"eval": {"init_params": {"id": "Isaac-Test"}}},
+            "algorithm": {"eval_rollout_epoch": 1} if legacy_eval else {},
             "runner": {"logger": {"log_path": "unused"}},
         }
     )
@@ -479,6 +481,9 @@ def test_rlinf_play_forwards_checkpoint_to_rollout_worker(monkeypatch, tmp_path)
     def validate(config):
         assert config.runner.ckpt_path == str(checkpoint)
         assert config.runner.only_eval
+        assert config.env.eval.rollout_epoch == 3
+        if legacy_eval:
+            assert config.algorithm.eval_rollout_epoch == 3
         raise ConfigChecked
 
     modules = {
@@ -500,7 +505,7 @@ def test_rlinf_play_forwards_checkpoint_to_rollout_worker(monkeypatch, tmp_path)
     monkeypatch.setattr("hydra.initialize_config_dir", lambda **kwargs: None)
     monkeypatch.setattr("hydra.compose", lambda **kwargs: cfg)
     with pytest.raises(ConfigChecked):
-        play_rlinf.run(["--config_name", "test", "--checkpoint", str(checkpoint)])
+        play_rlinf.run(["--config_name", "test", "--checkpoint", str(checkpoint), "--num_episodes", "3"])
 
 
 def test_run_backend_restores_sys_argv_after_training(monkeypatch) -> None:

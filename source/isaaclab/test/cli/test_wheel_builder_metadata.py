@@ -118,10 +118,7 @@ def test_wheel_builder_omits_integrations_without_published_wheels(source_checko
     # Source checkouts retain the integrations through their Git requirements.
     assert any(dep.startswith("rl-games @ git+") for dep in source_project["optional-dependencies"]["rl-games"])
     assert any(dep.startswith("robomimic @ git+") for dep in source_project["optional-dependencies"]["mimic"])
-    assert any(
-        dep.startswith("cosmos-framework @ git+")
-        for dep in source_project["optional-dependencies"]["cosmos3"]
-    )
+    assert any(dep.startswith("cosmos-framework @ git+") for dep in source_project["optional-dependencies"]["cosmos3"])
 
     # The published wheel cannot expose the RL-Games extra or reference either Git-only distribution.
     assert "rl-games" not in generated_project["optional-dependencies"]
