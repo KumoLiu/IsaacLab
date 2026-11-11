@@ -458,6 +458,56 @@ def test_rlinf_rejects_pretrained_checkpoint() -> None:
         resolve_rlinf_checkpoint("pretrained", log_root_path="logs/rlinf", task="Isaac-Task", config_name="ppo")
 
 
+@pytest.mark.parametrize("legacy_eval", [False, True])
+def test_rlinf_play_forwards_checkpoint_to_rollout_worker(monkeypatch, tmp_path, legacy_eval: bool) -> None:
+    """Playback must fill the checkpoint field consumed by RLinf's HF worker."""
+    from omegaconf import OmegaConf
+
+    from isaaclab_rl.entrypoints.backends import play_rlinf
+
+    checkpoint = tmp_path / "full_weights.pt"
+    checkpoint.touch()
+    cfg = OmegaConf.create(
+        {
+            "env": {"eval": {"init_params": {"id": "Isaac-Test"}}},
+            "algorithm": {"eval_rollout_epoch": 1} if legacy_eval else {},
+            "runner": {"logger": {"log_path": "unused"}},
+        }
+    )
+
+    class ConfigChecked(Exception):
+        pass
+
+    def validate(config):
+        assert config.runner.ckpt_path == str(checkpoint)
+        assert config.runner.only_eval
+        assert config.env.eval.rollout_epoch == 3
+        if legacy_eval:
+            assert config.algorithm.eval_rollout_epoch == 3
+        raise ConfigChecked
+
+    modules = {
+        "rlinf": {},
+        "rlinf.config": {"validate_cfg": validate},
+        "rlinf.runners.embodied_eval_runner": {"EmbodiedEvalRunner": None},
+        "rlinf.scheduler": {"Cluster": None},
+        "rlinf.utils.placement": {"HybridComponentPlacement": None},
+        "rlinf.workers.env.env_worker": {"EnvWorker": None},
+        "rlinf.workers.rollout.hf.huggingface_worker": {"MultiStepRolloutWorker": None},
+    }
+    for name, attrs in modules.items():
+        module = types.ModuleType(name)
+        module.__dict__.update(attrs)
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(play_rlinf.cli_args, "configure_rlinf_environment", lambda *args: str(tmp_path))
+    monkeypatch.setattr("torch.multiprocessing.set_start_method", lambda *args, **kwargs: None)
+    monkeypatch.setattr("hydra.initialize_config_dir", lambda **kwargs: None)
+    monkeypatch.setattr("hydra.compose", lambda **kwargs: cfg)
+    with pytest.raises(ConfigChecked):
+        play_rlinf.run(["--config_name", "test", "--checkpoint", str(checkpoint), "--num_episodes", "3"])
+
+
 def test_run_backend_restores_sys_argv_after_training(monkeypatch) -> None:
     """A training backend that mutates ``sys.argv`` must not leak the change to the caller."""
     module = types.ModuleType("fake_train_backend")
@@ -783,3 +833,25 @@ def test_skrl_play_restores_jax_backend(monkeypatch) -> None:
         play_skrl.run([])
 
     assert not hasattr(skrl.config.jax, "backend")
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_rlinf_checkpoint_root_restores_actor_and_optimizer(tmp_path, nested: bool) -> None:
+    """The public checkpoint selector returns a file; the runner needs its step root."""
+    from isaaclab_rl.entrypoints.backends.cli_args_rlinf import (
+        resolve_rlinf_checkpoint,
+        resolve_rlinf_resume_dir,
+    )
+
+    step = tmp_path / "global_step_2"
+    actor = step / "actor"
+    weights_dir = actor / "model_state_dict" if nested else actor
+    weights_dir.mkdir(parents=True)
+    weights = weights_dir / "full_weights.pt"
+    weights.touch()
+    resolved = resolve_rlinf_checkpoint(str(step), log_root_path=str(tmp_path), task="task", config_name="config")
+    assert resolved == str(weights)
+    assert resolve_rlinf_checkpoint(str(actor), log_root_path=str(tmp_path), task="task", config_name="config") == str(
+        weights
+    )
+    assert resolve_rlinf_resume_dir(resolved) == str(step)

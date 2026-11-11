@@ -627,3 +627,39 @@ class TestRandomPolicy:
             img.cpu().numpy(),
             atol=1e-6,
         )
+
+
+def test_task_can_select_neural_wrapper(set_config_env):
+    """Neural tasks use their configured RLinf adapter rather than the Kit wrapper."""
+    cfg = ext._load_full_cfg()
+    cfg["env"]["train"]["isaaclab"]["env_wrapper"] = "types:SimpleNamespace"
+    ext._register_isaaclab_envs()
+    registry = _rlinf_mocks["rlinf.envs.isaaclab"].REGISTER_ISAACLAB_ENVS
+    assert registry["Isaac-Test-Task-v0"] is types.SimpleNamespace
+
+
+def test_train_eval_wrapper_conflict_is_rejected(set_config_env):
+    """One registry task cannot select two different wrapper implementations."""
+    cfg = ext._load_full_cfg()
+    cfg["env"]["eval"]["init_params"]["id"] = cfg["env"]["train"]["init_params"]["id"]
+    cfg["env"]["train"]["isaaclab"]["env_wrapper"] = "types:SimpleNamespace"
+    with pytest.raises(ValueError, match="must agree"):
+        ext._register_isaaclab_envs()
+
+
+def test_ordered_action_mapping_does_not_depend_on_processor_dict_order(set_config_env):
+    """Robot joint order is explicit even if the processor returns another key order."""
+    cfg = ext._get_isaaclab_cfg()
+    cfg["action_mapping"] = {"keys": ["arm", "hand"]}
+    parts = {"action.hand": np.full((1, 2, 2), 2), "action.arm": np.full((1, 2, 3), 1)}
+    result = ext._convert_gr00t_to_isaaclab_action(parts, chunk_size=2)
+    np.testing.assert_array_equal(result[0, 0], [1, 1, 1, 2, 2])
+
+
+def test_language_annotation_key_is_task_configurable(set_config_env):
+    """GR00T checkpoint language schemas need not use the legacy action annotation."""
+    cfg = ext._get_isaaclab_cfg()
+    cfg["gr00t_mapping"]["language"] = "annotation.human.task_description"
+    result = ext._convert_isaaclab_obs_to_gr00t({"task_descriptions": ["unfold pad"]})
+    assert result["annotation.human.task_description"] == ["unfold pad"]
+    assert "annotation.human.action.task_description" not in result

@@ -41,6 +41,7 @@ Usage:
 from __future__ import annotations
 
 import collections.abc
+import importlib
 import logging
 import os
 from enum import Enum
@@ -284,9 +285,11 @@ def _register_gr00t_converters(cfg: dict) -> None:
         simulation_io.OBS_CONVERSION[obs_converter_type] = _convert_isaaclab_obs_to_gr00t
         logger.info(f"Registered obs converter: {obs_converter_type}")
 
-    if obs_converter_type not in simulation_io.ACTION_CONVERSION:
-        simulation_io.ACTION_CONVERSION[obs_converter_type] = _convert_gr00t_to_isaaclab_action
-        logger.info(f"Registered action converter: {obs_converter_type}")
+    for name in ("ACTION_CONVERSION", "ACTION_CONVERSION_N1D5", "ACTION_CONVERSION_N1D6", "ACTION_CONVERSION_N1D7"):
+        registry = getattr(simulation_io, name, None)
+        if registry is not None and obs_converter_type not in registry:
+            registry[obs_converter_type] = _convert_gr00t_to_isaaclab_action
+            logger.info(f"Registered action converter: {obs_converter_type} in {name}")
 
 
 def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
@@ -341,7 +344,8 @@ def _convert_isaaclab_obs_to_gr00t(env_obs: dict) -> dict:
                     groot_obs[gr00t_key] = states_np[:, :, slice_range[0] : slice_range[1]]
 
     # Pass through task descriptions
-    groot_obs["annotation.human.action.task_description"] = env_obs.get("task_descriptions", [])
+    language_key = gr00t_mapping.get("language", "annotation.human.action.task_description")
+    groot_obs[language_key] = env_obs.get("task_descriptions", [])
 
     return groot_obs
 
@@ -368,7 +372,12 @@ def _convert_gr00t_to_isaaclab_action(action_chunk: dict, chunk_size: int = 1) -
     suffix_pad = action_mapping.get("suffix_pad", 0)
 
     # Concatenate all action parts
-    action_parts = [v[:, :chunk_size, :] for v in action_chunk.values()]
+    keys = action_mapping.get("keys")
+    if keys:
+        values = [action_chunk[key if key in action_chunk else f"action.{key}"] for key in keys]
+    else:
+        values = action_chunk.values()
+    action_parts = [value[:, :chunk_size, :] for value in values]
     action_concat = np.concatenate(action_parts, axis=-1)
 
     # Apply padding
@@ -382,13 +391,23 @@ def _convert_gr00t_to_isaaclab_action(action_chunk: dict, chunk_size: int = 1) -
     return action_concat
 
 
+def _isaaclab_registry():
+    """Load the RLinf Isaac Lab registry before/after its sim namespace migration."""
+    try:
+        return importlib.import_module("rlinf.envs.isaaclab")
+    except ModuleNotFoundError as error:
+        if error.name != "rlinf.envs.isaaclab":
+            raise
+        return importlib.import_module("rlinf.envs.sim.isaaclab")
+
+
 def _register_isaaclab_envs() -> None:
     """Register IsaacLab tasks into RLinf's REGISTER_ISAACLAB_ENVS map.
 
     Task IDs are read from ``env.train.init_params.id`` and
     ``env.eval.init_params.id`` in the YAML config.
     """
-    from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
+    REGISTER_ISAACLAB_ENVS = _isaaclab_registry().REGISTER_ISAACLAB_ENVS
 
     # Collect unique task IDs from the YAML config (train + eval)
     full_cfg = _load_full_cfg()
@@ -411,7 +430,19 @@ def _register_isaaclab_envs() -> None:
             continue
 
         # Create a generic wrapper class for this task
-        env_class = _create_generic_env_wrapper(task_id)
+        entry_points = {
+            env_cfg.get(section, {}).get("isaaclab", {}).get("env_wrapper")
+            for section in ("train", "eval")
+            if env_cfg.get(section, {}).get("init_params", {}).get("id") == task_id
+        }
+        if len(entry_points) != 1:
+            raise ValueError(f"Train/eval env_wrapper must agree for task {task_id}")
+        entry_point = entry_points.pop()
+        if entry_point:
+            module, name = entry_point.split(":", 1)
+            env_class = getattr(importlib.import_module(module), name)
+        else:
+            env_class = _create_generic_env_wrapper(task_id)
         REGISTER_ISAACLAB_ENVS[task_id] = env_class
         logger.info(f"Registered IsaacLab task '{task_id}' for RLinf")
 
@@ -433,7 +464,7 @@ def _create_generic_env_wrapper(task_id: str) -> type:
     Returns:
         A class that inherits from IsaaclabBaseEnv.
     """
-    from rlinf.envs.isaaclab.isaaclab_env import IsaaclabBaseEnv
+    IsaaclabBaseEnv = importlib.import_module(f"{_isaaclab_registry().__name__}.isaaclab_env").IsaaclabBaseEnv
 
     _task_id = task_id
 
