@@ -235,6 +235,59 @@ Do not set this aarch64 path on x86_64 Linux. If it was inherited from a
 previous setup, run ``unset LD_PRELOAD`` before launching Isaac Lab.
 
 
+External task recipes and policy inputs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The CLI's ``--task`` overrides the task IDs in the recipe for both training and
+validation workers. Without it, each split retains its own task ID. Simulator
+subprocesses discover installed tasks through the ``isaaclab.tasks`` entry-point
+group, so downstream tasks do not need to be copied into Isaac Lab.
+
+Camera preprocessing is configured under each split's ``isaaclab`` section with
+``gpu_resize_height``, ``gpu_resize_width``, ``gpu_crop_scale`` and
+``gpu_crop_random``. Cropping runs before resizing on the image device, for both
+main and extra camera views. The default crop scale is zero. GR00T N1.5 requires
+the final train/eval image dimensions to match; incompatible dimensions raise an
+error when loading the policy. Random training crops and center evaluation crops
+may still differ while producing the same output dimensions.
+
+A training recipe may set ``runner.isaaclab_context`` to a ``module:callable``
+string to manage optional services around worker initialization and training:
+
+.. code-block:: yaml
+
+   runner:
+     isaaclab_context: my_demo.training:service_context
+
+The callable receives the RLinf runner and CLI environment overrides and returns
+a context manager. Its cleanup runs after training, including on an exception.
+Recipes without this setting run as before. Keep service-specific behavior in the
+downstream task; the context is training configuration and is not passed to Gym
+environment constructors.
+
+
+Episode success metrics
+~~~~~~~~~~~~~~~~~~~~~~~
+
+For tasks with both success and failure terminations, configure an explicit Boolean
+success observation under each split's ``isaaclab`` section:
+
+.. code-block:: yaml
+
+   success_observation:
+     group: metrics
+     key: success
+
+The adapter records success only when this observation is true on a terminated step.
+The task must expose the completed episode's outcome on that step, including when the
+simulator resets automatically. Without this setting, existing recipes continue to
+count task terminations as success. Timeouts alone do not count as success.
+
+Train and evaluation retain their own ``init_params.env_overrides`` from the recipe.
+Command-line environment overrides replace recipe entries with the same key before
+being appended, including preset selectors such as ``physics`` and ``renderer``.
+
+
 Quick Start
 -----------
 
