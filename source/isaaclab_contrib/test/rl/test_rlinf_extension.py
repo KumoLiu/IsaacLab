@@ -71,6 +71,18 @@ def _build_rlinf_mocks() -> dict[str, types.ModuleType]:
             self.device = "cpu"
             self.task_description = ""
 
+        @property
+        def elapsed_steps(self):
+            return self._elapsed_steps
+
+        def step(self, actions=None, auto_reset=True):
+            # Model the upstream boundary: RLinf wraps post-reset observations and drops
+            # simulator infos before recording metrics. The adapter must bypass this for success.
+            obs, reward, terminated, truncated, _ = self.env.step(actions)
+            obs = self._wrap_obs(obs)
+            self._elapsed_steps += 1
+            return obs, reward, terminated, truncated, self._record_metrics(reward, terminated, {})
+
     mock_isaaclab_base.IsaaclabBaseEnv = _FakeIsaaclabBaseEnv
 
     # Build the module hierarchy
@@ -162,10 +174,11 @@ _SAMPLE_YAML = {
 
 
 @pytest.fixture(autouse=True)
-def _reset_extension_state():
+def _reset_extension_state(monkeypatch):
     """Reset extension module-level caches before each test."""
     ext._registered = False
     ext._full_cfg_cache = None
+    monkeypatch.delenv("ISAACLAB_RLINF_TASK", raising=False)
     # Reset mock registries
     sim_io = _rlinf_mocks["rlinf.models.embodiment.gr00t.simulation_io"]
     sim_io.OBS_CONVERSION.clear()
@@ -245,8 +258,116 @@ class TestConfigLoading:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "explicit_success,ignore_terminations,missing_final",
+    [(True, False, False), (True, True, False), (False, False, False), (True, False, True)],
+    ids=["terminal-success", "suppressed-terminations", "legacy-termination", "missing-terminal-data"],
+)
+def test_episode_success_distinguishes_failure_and_timeout(
+    explicit_success, ignore_terminations, missing_final, set_config_env
+) -> None:
+    """Metrics use the completed episode while policy inputs use the reset episode."""
+    from omegaconf import OmegaConf
+
+    options = {"success_observation": {"group": "metrics", "key": "success"}} if explicit_success else {}
+    worker = ext._create_generic_env_wrapper("test")(
+        OmegaConf.create({"isaaclab": options, "max_episode_steps": 100}), 3, 0, 1, None
+    )
+    worker.returns = torch.zeros(3)
+    worker.success_once = torch.zeros(3, dtype=torch.bool)
+    worker._elapsed_steps = torch.zeros(3)
+    worker._chunk_done = torch.zeros(3, dtype=torch.bool)
+    worker.ignore_terminations = ignore_terminations
+    worker.auto_reset = False
+    # Reset flips both completed episodes' flags, so reading the policy observation is wrong.
+    reset_states = torch.tensor([[10.0], [20.0], [30.0]])
+    next_obs = {"metrics": {"success": torch.tensor([[False], [True], [True]])}}
+    worker._isaaclab_cfg["states"] = ["joint_pos"]
+    next_obs["policy"] = {"joint_pos": reset_states}
+    success = torch.tensor([[True], [False], [True]])
+    final_info = {} if missing_final else {"final_obs": {"metrics": {"success": success}}}
+    terminations = torch.tensor([True, True, False])
+    worker.env = mock.Mock()
+    worker.env.step.side_effect = [
+        (next_obs, torch.tensor([2.0, -1.0, 0.0]), terminations, torch.tensor([False, False, True]), final_info),
+        (next_obs, torch.ones(3), torch.zeros(3, dtype=torch.bool), torch.zeros(3, dtype=torch.bool), {}),
+    ]
+    if missing_final:
+        with pytest.raises(RuntimeError, match="pre-reset final_obs"):
+            worker.step(torch.zeros(3, 1), auto_reset=False)
+        return
+    obs, _, terminated, truncated, info = worker.step(torch.zeros(3, 1), auto_reset=False)
+    expected = [True, not explicit_success, False]
+    assert info["episode"]["success_once"].tolist() == expected
+    if explicit_success:
+        assert info["episode"]["success_at_end"].tolist() == expected
+    assert terminated.tolist() == ([False, False, False] if ignore_terminations else [True, True, False])
+    assert terminations.tolist() == [True, True, False]  # Suppression must not mutate simulator buffers.
+    assert truncated.tolist() == [False, False, True]
+    assert worker._chunk_done.tolist() == [True, True, True]
+    torch.testing.assert_close(obs["states"], reset_states)
+    assert set(info) == {"episode"}  # Do not retain terminal RGB in the rollout info list.
+    success.zero_()
+    assert info["episode"]["success_once"].tolist() == expected
+    _, _, _, _, next_info = worker.step(torch.zeros(3, 1), auto_reset=False)
+    assert next_info["episode"]["success_once"].tolist() == expected
+    if explicit_success:
+        assert next_info["episode"]["success_at_end"].tolist() == [False, False, False]
+    torch.testing.assert_close(next_info["episode"]["return"], torch.tensor([3.0, 0.0, 1.0]))
+
+
+@pytest.mark.parametrize("explicit_success", [True, False], ids=["terminal-capture", "unchanged-config"])
+def test_success_configuration_enables_terminal_capture(explicit_success, set_config_env, monkeypatch) -> None:
+    """Constructed simulator environments capture final observations only when required."""
+    import contextlib
+
+    import gymnasium as gym
+    from omegaconf import OmegaConf
+
+    import isaaclab.app
+    import isaaclab.cli
+
+    import isaaclab_tasks.utils
+
+    options = {"success_observation": {"group": "metrics", "key": "success"}} if explicit_success else {}
+    worker = ext._create_generic_env_wrapper("test")(
+        OmegaConf.create({"isaaclab": options, "init_params": {"num_envs": 3}}), 3, 0, 1, None
+    )
+    cfg = types.SimpleNamespace(compute_final_obs=False)
+    monkeypatch.setattr(isaaclab_tasks.utils, "parse_env_cfg", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(isaaclab.cli, "load_external_tasks", lambda: None)
+    monkeypatch.setattr(isaaclab.app, "launch_simulation", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(gym, "make", lambda *args, **kwargs: types.SimpleNamespace(unwrapped=kwargs["cfg"]))
+    env, runtime = worker._make_env_function()()
+    try:
+        assert env.compute_final_obs is explicit_success
+    finally:
+        runtime.close()
+
+
 class TestObsConversion:
-    """Tests for ``_convert_isaaclab_obs_to_gr00t``."""
+    """Worker observation preprocessing and conversion into GR00T inputs."""
+
+    def test_policy_camera_resize_uses_evaluation_options_for_all_views(self, set_config_env) -> None:
+        from omegaconf import OmegaConf
+
+        options = {
+            "states": [{"key": "joints", "slice": [1, 3]}],
+            "main_images": "head",
+            "extra_view_images": ["wrist"],
+            "gpu_resize_height": 2,
+            "gpu_resize_width": 3,
+        }
+        worker = ext._create_generic_env_wrapper("test")(OmegaConf.create({"isaaclab": options}), 2, 0, 1, None)
+        head = torch.full((2, 4, 6, 3), 17, dtype=torch.uint8)
+        wrist = torch.full_like(head, 83)
+        joints = torch.arange(8).reshape(2, 4)
+        obs = worker._wrap_obs({"policy": {"joints": joints}, "camera_images": {"head": head, "wrist": wrist}})
+        torch.testing.assert_close(obs["states"], joints[:, 1:3])
+        assert obs["main_images"].shape == (2, 2, 3, 3)
+        assert obs["extra_view_images"].shape == (2, 1, 2, 3, 3)
+        assert obs["main_images"].dtype == obs["extra_view_images"].dtype == torch.uint8
+        assert (obs["main_images"] == 17).all() and (obs["extra_view_images"] == 83).all()
 
     def test_extra_view_images_conversion(self, set_config_env) -> None:
         """Extra view images should be split into separate GR00T video keys."""
@@ -343,6 +464,100 @@ class TestActionConversion:
         np.testing.assert_array_equal(result, np.broadcast_to(expected, (2, 1, 3)))
 
 
+@pytest.fixture()
+def n15_loader(monkeypatch, tmp_path):
+    """Exercise the real adapter loader with lightweight model and transform dependencies."""
+    from pydantic import BaseModel
+
+    class VideoMetadata(BaseModel):
+        resolution: tuple[int, int]
+
+    class Modalities(BaseModel):
+        video: dict[str, VideoMetadata]
+
+    class Metadata(BaseModel):
+        modalities: Modalities
+
+    metadata = Metadata(modalities=Modalities(video={"head": VideoMetadata(resolution=(320, 240))}))
+    model = mock.Mock(metadata=metadata)
+    transform = mock.Mock()
+    data_config = mock.Mock()
+    data_config.transform.return_value = transform
+    dependencies = {
+        "gr00t": {},
+        "gr00t.experiment": {},
+        "gr00t.experiment.data_config": {"load_data_config": lambda _: data_config},
+        "rlinf.models.embodiment.gr00t.gr00t_n1d5": {},
+        "rlinf.models.embodiment.gr00t.gr00t_n1d5.gr00t_action_model": {
+            "GR00T_N1_5_ForRLActionPrediction": mock.Mock(from_pretrained=mock.Mock(return_value=model))
+        },
+        "rlinf.models.embodiment.gr00t.utils": {"replace_dropout_with_identity": mock.Mock()},
+        "rlinf.utils.patcher": {"Patcher": mock.Mock()},
+    }
+    for name, attrs in dependencies.items():
+        module = types.ModuleType(name)
+        vars(module).update(attrs)
+        monkeypatch.setitem(sys.modules, name, module)
+    gr00t = _rlinf_mocks["rlinf.models.embodiment.gr00t"]
+    monkeypatch.setattr(gr00t, "get_model", None, raising=False)
+
+    def load(training, evaluation):
+        options = {"data_config_class": "test:DataConfig", **training}
+        monkeypatch.setattr(
+            ext, "_full_cfg_cache", {"env": {"train": {"isaaclab": options}, "eval": {"isaaclab": evaluation}}}
+        )
+        ext._patch_gr00t_get_model(options)
+        model_cfg = types.SimpleNamespace(
+            model_path=str(tmp_path),
+            embodiment_tag="new_embodiment",
+            denoising_steps=4,
+            num_action_chunks=16,
+            obs_converter_type="isaaclab",
+            rl_head_config=types.SimpleNamespace(add_value_head=False, disable_dropout=False),
+        )
+        gr00t.get_model(model_cfg)
+        return model, transform
+
+    return load
+
+
+@pytest.mark.parametrize(
+    "training,evaluation,expected",
+    [
+        ({"gpu_resize_width": 256, "gpu_resize_height": 128}, {}, (256, 128)),
+        ({"gpu_resize_width": 192, "gpu_resize_height": 240}, {}, (192, 240)),
+    ],
+)
+def test_n15_loader_sets_input_size_without_mutating_checkpoint_metadata(
+    n15_loader, training, evaluation, expected
+) -> None:
+    """The transform sees resized width/height without mutating checkpoint metadata."""
+    model, transform = n15_loader(training, evaluation)
+    actual = transform.set_metadata.call_args.args[0]
+    assert actual.modalities.video["head"].resolution == expected
+    assert model.metadata.modalities.video["head"].resolution == (320, 240)
+
+
+@pytest.mark.parametrize(
+    "training,evaluation",
+    [
+        ({"gpu_resize_width": 224}, {}),
+        ({}, {"gpu_resize_height": 240}),
+    ],
+)
+def test_n15_loader_rejects_partial_resize(n15_loader, training, evaluation) -> None:
+    """Unspecified camera dimensions cannot be inferred from recording metadata."""
+    with pytest.raises(ValueError, match="requires both gpu_resize_width and gpu_resize_height"):
+        n15_loader(training, evaluation)
+
+
+@pytest.mark.parametrize("training", [{"gpu_resize_width": 256, "gpu_resize_height": 128}, {}])
+def test_n15_loader_rejects_incompatible_evaluation_image_sizes(n15_loader, training) -> None:
+    """A shared policy must reject different final train/eval dimensions before rollout."""
+    with pytest.raises(ValueError, match="matching train/eval image sizes"):
+        n15_loader(training, {"gpu_resize_width": 224, "gpu_resize_height": 224})
+
+
 # ---------------------------------------------------------------------------
 # Tests: embodiment tag patching
 # ---------------------------------------------------------------------------
@@ -393,14 +608,16 @@ class TestEmbodimentTagPatching:
 class TestTaskRegistration:
     """Tests for ``_register_isaaclab_envs``."""
 
-    def test_tasks_registered_from_yaml(self, set_config_env) -> None:
-        """Task IDs from train and eval sections should be registered."""
+    @pytest.mark.parametrize("override", [None, "Isaac-Test-Cosmos-v0"])
+    def test_tasks_registered_for_worker(self, set_config_env, monkeypatch, override) -> None:
+        """The worker can select the CLI task or the distinct train and eval tasks in the recipe."""
+        if override:
+            monkeypatch.setenv("ISAACLAB_RLINF_TASK", override)
         ext._load_full_cfg()
         ext._register_isaaclab_envs()
 
         registry = _rlinf_mocks["rlinf.envs.isaaclab"].REGISTER_ISAACLAB_ENVS
-        assert "Isaac-Test-Task-v0" in registry
-        assert "Isaac-Test-Task-Eval-v0" in registry
+        assert set(registry) == ({override} if override else {"Isaac-Test-Task-v0", "Isaac-Test-Task-Eval-v0"})
         base = _rlinf_mocks["rlinf.envs.isaaclab.isaaclab_env"].IsaaclabBaseEnv
         for env_cls in registry.values():
             assert issubclass(env_cls, base)
@@ -431,11 +648,31 @@ class TestTaskRegistration:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("hold_pose,device", [(False, "cpu"), *((True, device) for device in test_devices())])
-def test_midchunk_reset_does_not_replay_old_episode_actions(monkeypatch, hold_pose, device):
+@pytest.mark.parametrize(
+    "hold_pose,device,prefix_pad,suffix_pad",
+    [
+        (False, "cpu", 0, 0),
+        *((True, device, 0, 0) for device in test_devices()),
+        (True, "cpu", 2, 1),
+    ],
+)
+def test_midchunk_reset_does_not_replay_old_episode_actions(
+    monkeypatch, hold_pose, device, prefix_pad, suffix_pad
+) -> None:
     """Only reset worlds hold their returned joint positions, until the next chunk."""
     monkeypatch.setattr(
-        ext, "_full_cfg_cache", {"env": {"train": {"isaaclab": {"hold_pose_on_midchunk_reset": hold_pose}}}}
+        ext,
+        "_full_cfg_cache",
+        {
+            "env": {
+                "train": {
+                    "isaaclab": {
+                        "hold_pose_on_midchunk_reset": hold_pose,
+                        "action_mapping": {"prefix_pad": 0, "suffix_pad": 0},
+                    }
+                }
+            }
+        },
     )
     base = _rlinf_mocks["rlinf.envs.isaaclab.isaaclab_env"].IsaaclabBaseEnv
     states = torch.tensor([[0.2, 0.3], [0.4, 0.5]], device=device)
@@ -455,13 +692,16 @@ def test_midchunk_reset_does_not_replay_old_episode_actions(monkeypatch, hold_po
         return [self.step(action, auto_reset=False) for action in actions.unbind(dim=1)]
 
     monkeypatch.setattr(base, "chunk_step", chunk_step, raising=False)
-    env = ext._create_generic_env_wrapper("test")(None, 2, 0, 1, None)
+    options = {"isaaclab": {"action_mapping": {"prefix_pad": prefix_pad, "suffix_pad": suffix_pad}}}
+    env = ext._create_generic_env_wrapper("test")(options, 2, 0, 1, None)
     env.device = device
-    actions = torch.ones(2, 2)  # The RLinf env worker receives action chunks on the CPU.
+    actions = torch.ones(2, prefix_pad + 2 + suffix_pad)  # RLinf receives padded action chunks on the CPU.
     env.chunk_step(torch.stack([actions, actions * 2], dim=1))
     expected = (actions * 2).to(device)
     if hold_pose:
-        expected[0] = states[0]
+        expected[0] = torch.cat(
+            (torch.zeros(prefix_pad, device=device), states[0], torch.zeros(suffix_pad, device=device))
+        )
     torch.testing.assert_close(step.call_args.args[0], expected)
     env.step(actions * 3)
     torch.testing.assert_close(step.call_args.args[0], actions * 3)
